@@ -17,6 +17,13 @@
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 
 html, body { height: 100%; }
+html { background: var(--cream); }
+
+/* На компьютере сайт показывается колонкой по центру */
+@media (min-width: 600px) {
+  html { background: #1b1915 radial-gradient(ellipse at 50% 0%, rgba(184,145,58,.18) 0%, transparent 60%); }
+  body { box-shadow: 0 0 0 1px rgba(184,145,58,.2), 0 30px 80px rgba(0,0,0,.5); }
+}
 
 body {
   width: 100%; max-width: 430px;

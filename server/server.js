@@ -1,7 +1,7 @@
 // Мини-сервер без зависимостей: отдаёт public/ и проксирует запросы к ИИ.
 // Ключ API хранится только здесь (в переменной окружения), а не в браузере.
 //
-// Запуск:  GROQ_API_KEY=... node server/server.js
+// Запуск:  npm start  (настройки — в .env, см. .env.example)
 'use strict';
 
 const http = require('http');
@@ -12,9 +12,9 @@ loadDotEnv(path.join(__dirname, '..', '.env'));
 
 const PORT = +process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
-const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-const AI_MODEL = process.env.AI_MODEL || 'llama-3.3-70b-versatile';
-const AI_URL = process.env.AI_URL || 'https://api.groq.com/openai/v1/chat/completions';
+const { pickProvider } = require('./ai');
+// За nginx / балансировщиком реальный IP берём из X-Forwarded-For
+const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 // Через запятую; '*' — разрешить всем (удобно для разработки iOS-оболочки)
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -39,6 +39,11 @@ const MIME = {
 
 // Простое ограничение частоты: 20 запросов к ИИ в минуту с одного IP
 const hits = new Map();
+setInterval(() => hits.clear(), 10 * 60e3).unref();
+function clientIp(req) {
+  if (TRUST_PROXY && req.headers['x-forwarded-for']) return req.headers['x-forwarded-for'].split(',')[0].trim();
+  return req.socket.remoteAddress;
+}
 function rateLimited(ip) {
   const now = Date.now();
   const list = (hits.get(ip) || []).filter(t => now - t < 60e3);
@@ -78,9 +83,9 @@ function readBody(req, limit = 64 * 1024) {
 }
 
 async function handleAI(req, res) {
-  if (!GROQ_API_KEY) return sendJson(res, 503, { error: 'ИИ-ассистент не настроен: на сервере не задан GROQ_API_KEY.' });
-  const ip = req.socket.remoteAddress;
-  if (rateLimited(ip)) return sendJson(res, 429, { error: 'Слишком много вопросов подряд. Подождите минуту.' });
+  const provider = pickProvider();
+  if (!provider || !provider.configured()) return sendJson(res, 503, { error: 'ИИ-ассистент пока не подключён. Загляните чуть позже.' });
+  if (rateLimited(clientIp(req))) return sendJson(res, 429, { error: 'Слишком много вопросов подряд. Подождите минуту.' });
 
   let body;
   try { body = JSON.parse(await readBody(req)); } catch (e) { return sendJson(res, 400, { error: 'Некорректный запрос.' }); }
@@ -97,20 +102,11 @@ async function handleAI(req, res) {
   const system = SYSTEM_PROMPT + (context ? `\n\nДанные приложения (справочно):\n${context}` : '');
 
   try {
-    const r = await fetch(AI_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${GROQ_API_KEY}` },
-      body: JSON.stringify({ model: AI_MODEL, messages: [{ role: 'system', content: system }, ...messages], max_tokens: 700, temperature: 0.6 }),
-    });
-    const data = await r.json();
-    if (!r.ok) {
-      console.error('AI error', r.status, data && data.error);
-      return sendJson(res, 502, { error: 'Ассистент временно недоступен.' });
-    }
-    sendJson(res, 200, { reply: data.choices[0].message.content.trim() });
+    const reply = await provider.complete([{ role: 'system', content: system }, ...messages], { maxTokens: 700, temperature: 0.6 });
+    sendJson(res, 200, { reply: String(reply || '').trim() || 'Не удалось сформулировать ответ, попробуйте переспросить.' });
   } catch (e) {
-    console.error('AI fetch failed', e.message);
-    sendJson(res, 502, { error: 'Ассистент временно недоступен.' });
+    console.error(`[${provider.name}]`, e.message, e.cause ? e.cause.message || e.cause.code : '', e.details ? JSON.stringify(e.details) : '');
+    sendJson(res, 502, { error: 'Ассистент временно недоступен. Попробуйте ещё раз через минуту.' });
   }
 }
 
@@ -133,14 +129,18 @@ const server = http.createServer((req, res) => {
   setCors(req, res);
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
   if (req.url === '/api/ai' && req.method === 'POST') return handleAI(req, res);
-  if (req.url === '/api/health') return sendJson(res, 200, { ok: true, ai: !!GROQ_API_KEY });
+  if (req.url === '/api/health') {
+    const p = pickProvider();
+    return sendJson(res, 200, { ok: true, ai: p && p.configured() ? p.name : null });
+  }
   if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res);
   res.writeHead(405); res.end();
 });
 
 server.listen(PORT, () => {
   console.log(`Пространство: http://localhost:${PORT}`);
-  if (!GROQ_API_KEY) console.log('⚠ GROQ_API_KEY не задан — ИИ-ассистент будет отвечать заглушкой.');
+  const p = pickProvider();
+  console.log(p && p.configured() ? `ИИ: ${p.name}` : '⚠ ИИ не настроен — заполните YANDEX_* или GIGACHAT_* в .env');
 });
 
 function loadDotEnv(file) {
