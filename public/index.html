@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0d0c0a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Пространство">
+<meta name="format-detection" content="telephone=no">
+<title>Пространство</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;0,600;1,300;1,400&family=Geologica:wght@300;400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<!-- TOP NAV -->
+<nav class="top-nav">
+  <div class="logo"><span class="lb">ПРОСТ</span>ранств<span class="li">О</span></div>
+  <div class="top-actions">
+    <div class="points-pill" id="points-pill" data-go="prizes" title="Ваши очки">
+      <span class="points-dot"></span><span id="points-value">0</span>
+    </div>
+    <button class="icon-btn" data-action="open-ai" aria-label="ИИ-ассистент">
+      <svg viewBox="0 0 24 24"><path d="M12 3l1.8 4.6L18.5 9l-4.7 1.5L12 15l-1.8-4.5L5.5 9l4.7-1.4z"/><path d="M19 15l.8 2 2 .8-2 .7-.8 2-.7-2-2-.7 2-.8z"/></svg>
+    </button>
+    <button class="icon-btn" data-action="open-cart" aria-label="Корзина">
+      <svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/></svg>
+      <div class="badge" id="cart-badge" hidden>0</div>
+    </button>
+  </div>
+</nav>
+
+<!-- CONTENT -->
+<main class="content-wrap" id="content-wrap">
+
+  <!-- ① ГЛАВНАЯ -->
+  <section class="page active" id="page-home">
+    <div class="hero">
+      <div class="hero-eyebrow">Маркетплейс · Сообщество · Подкасты</div>
+      <h1>Покупай.<br><em>Продавай.</em><br>Делись.</h1>
+      <div class="hero-divider"></div>
+      <p>Маркетплейс с честной комиссией <strong id="hero-commission"></strong>, живыми чатами с продавцами, ИИ-ассистентом и подкастами, за которые дают призы.</p>
+      <button class="hero-btn" data-go="shop">В магазин</button>
+    </div>
+
+    <div class="commission-compare">
+      <div class="cc-head">
+        <div class="section-title">Сколько получит продавец</div>
+        <div class="cc-hint">с продажи за <span id="cc-price-label"></span></div>
+      </div>
+      <input type="range" id="cc-price" min="500" max="30000" step="100" value="5000" aria-label="Цена товара">
+      <div class="cc-rows" id="cc-rows"></div>
+      <div class="cc-note">Ставки крупных площадок — ориентир, зависят от категории. Без учёта логистики.</div>
+    </div>
+
+    <div class="day-counter">
+      <div class="day-counter-head">
+        <div class="day-counter-title">Сегодня в Пространстве</div>
+        <div class="day-counter-date" id="today-date"></div>
+      </div>
+      <div class="counter-grid">
+        <div class="counter-item"><div class="counter-num">128</div><div class="counter-label">новых<br>товаров</div></div>
+        <div class="counter-item"><div class="counter-num">2</div><div class="counter-label">новых<br>выпуска</div></div>
+        <div class="counter-item"><div class="counter-num">12</div><div class="counter-label">новых<br>запросов</div></div>
+        <div class="counter-item"><div class="counter-num" id="home-drops-left">—</div><div class="counter-label">призов<br>осталось</div></div>
+      </div>
+    </div>
+
+    <div class="home-section">
+      <div class="section-header">
+        <div class="section-title">Новый выпуск</div>
+        <button class="section-more" data-go="podcasts">Все →</button>
+      </div>
+      <div id="home-episode"></div>
+    </div>
+
+    <div class="home-section tight">
+      <div class="section-header">
+        <div class="section-title">Популярное</div>
+        <button class="section-more" data-go="shop">Все →</button>
+      </div>
+      <div class="h-scroll" id="home-products"></div>
+    </div>
+
+    <div class="home-section">
+      <div class="segmented" id="community-tabs">
+        <button class="seg active" data-seg="cases">Кейсы</button>
+        <button class="seg" data-seg="requests">Запросы</button>
+      </div>
+      <div id="community-cases"></div>
+      <div id="community-requests" hidden>
+        <button class="add-request-btn" data-action="add-request">Разместить запрос</button>
+        <div id="requests-list"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② МАГАЗИН -->
+  <section class="page" id="page-shop">
+    <div class="shop-header">
+      <h2>Магазин</h2>
+      <p>Товары от мастеров и небольших брендов — без лишних наценок</p>
+      <div class="shop-badge" id="shop-badge"></div>
+    </div>
+    <div class="search-wrap">
+      <input class="search-input" id="shop-search" type="search" placeholder="Поиск товаров" autocomplete="off">
+    </div>
+    <div class="feed-filter" id="shop-filter"></div>
+    <div class="shop-banner" data-action="become-seller">
+      <div class="shop-banner-icon">✦</div>
+      <div class="shop-banner-text">
+        <strong>Хочешь продавать здесь?</strong>
+        <span>Комиссия от <b id="banner-commission"></b>, выплаты без задержек</span>
+      </div>
+    </div>
+    <div class="shop-grid" id="shop-grid"></div>
+    <div class="empty" id="shop-empty" hidden>Ничего не нашлось</div>
+  </section>
+
+  <!-- ③ ПОДКАСТЫ -->
+  <section class="page" id="page-podcasts">
+    <div class="pod-header">
+      <div class="pod-eyebrow">Слушай и получай очки</div>
+      <div class="pod-title">Подкасты</div>
+      <div class="pod-subtitle">Дослушал выпуск — получил очки. Очки обмениваются на лимитированные призы.</div>
+    </div>
+    <div class="feed-filter" id="pod-filter"></div>
+    <div class="episode-list" id="episode-list"></div>
+  </section>
+
+  <!-- ④ ЧАТЫ -->
+  <section class="page" id="page-chats">
+    <div class="shop-header">
+      <h2>Чаты</h2>
+      <p>Продавцы, покупатели и ИИ-ассистент — в одном месте</p>
+    </div>
+    <div class="msg-list" id="chat-list"></div>
+  </section>
+
+  <!-- ⑤ ПРИЗЫ -->
+  <section class="page" id="page-prizes">
+    <div class="ach-header">
+      <div class="ach-title">Призы</div>
+      <div class="ach-subtitle">Слушай подкасты, покупай, участвуй — обменивай очки на лимитки</div>
+      <div class="ach-points"><span id="ach-points">0</span> очков</div>
+    </div>
+
+    <div class="streak-bar">
+      <div class="streak-num" id="streak-num">0</div>
+      <div class="streak-text">
+        <strong>дней подряд</strong>
+        <span>Заходи каждый день — бонус за серию растёт</span>
+      </div>
+    </div>
+
+    <div class="prizes-section">
+      <div class="prizes-title">Лимитированные дропы</div>
+      <div id="drops-list"></div>
+    </div>
+
+    <div class="daily-tasks">
+      <div class="daily-title">Задания на сегодня</div>
+      <div id="tasks-list"></div>
+    </div>
+
+    <div class="prizes-section">
+      <div class="prizes-title">Мои призы</div>
+      <div id="my-prizes"></div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ПРОДУКТ (sheet) -->
+<div class="overlay" id="product-overlay" data-overlay>
+  <div class="overlay-topbar">
+    <button class="overlay-back" data-close>←</button>
+    <div class="overlay-title">Товар</div>
+  </div>
+  <div class="overlay-body" id="product-body"></div>
+</div>
+
+<!-- КОРЗИНА -->
+<div class="overlay" id="cart-overlay" data-overlay>
+  <div class="overlay-topbar">
+    <button class="overlay-back" data-close>←</button>
+    <div class="overlay-title">Корзина</div>
+  </div>
+  <div class="overlay-body" id="cart-body"></div>
+</div>
+
+<!-- ЧАТ (диалог) -->
+<div class="overlay" id="thread-overlay" data-overlay>
+  <div class="overlay-topbar">
+    <button class="overlay-back" data-close>←</button>
+    <div class="msg-avatar small" id="thread-avatar"></div>
+    <div>
+      <div class="overlay-title" id="thread-title"></div>
+      <div class="overlay-sub" id="thread-sub"></div>
+    </div>
+  </div>
+  <div class="thread" id="thread-body"></div>
+  <div class="ai-suggestions" id="thread-suggestions" hidden></div>
+  <form class="ai-input-wrap" id="thread-form">
+    <textarea class="ai-input" id="thread-input" placeholder="Сообщение..." rows="1"></textarea>
+    <button class="ai-send" type="submit" aria-label="Отправить">
+      <svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+    </button>
+  </form>
+</div>
+
+<!-- МИНИ-ПЛЕЕР -->
+<div class="mini-player" id="mini-player" hidden>
+  <div class="mp-progress"><div class="mp-progress-fill" id="mp-fill"></div></div>
+  <div class="mp-row">
+    <div class="mp-cover" id="mp-cover"></div>
+    <div class="mp-info">
+      <div class="mp-title" id="mp-title"></div>
+      <div class="mp-meta" id="mp-meta"></div>
+    </div>
+    <button class="mp-btn" id="mp-toggle" aria-label="Play/Pause"></button>
+    <button class="mp-btn" id="mp-fwd" aria-label="Вперёд 30 секунд">
+      <svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2-5"/><path d="M5 3v4h4"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- BOTTOM TAB BAR -->
+<nav class="tab-bar" id="tab-bar">
+  <button class="tab-btn active" data-tab="home">
+    <svg viewBox="0 0 24 24"><path d="M3 11l9-7 9 7v9a1 1 0 01-1 1h-5v-6H9v6H4a1 1 0 01-1-1z"/></svg>Главная
+  </button>
+  <button class="tab-btn" data-tab="shop">
+    <svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 12h-13z"/><path d="M8 8V6a4 4 0 018 0v2"/></svg>Магазин
+  </button>
+  <button class="tab-btn" data-tab="podcasts">
+    <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/></svg>Подкасты
+  </button>
+  <button class="tab-btn" data-tab="chats">
+    <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Чаты
+    <span class="tab-badge" id="chats-badge" hidden></span>
+  </button>
+  <button class="tab-btn" data-tab="prizes">
+    <svg viewBox="0 0 24 24"><rect x="3" y="8" width="18" height="13" rx="1"/><path d="M12 8v13M3 12h18M12 8S10 3 7.5 4 9 8 12 8zM12 8s2-5 4.5-4S15 8 12 8z"/></svg>Призы
+  </button>
+</nav>
+
+<script src="js/config.js"></script>
+<script src="js/data.js"></script>
+<script src="js/bridge.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
