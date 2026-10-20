@@ -71,8 +71,38 @@ function loadState() {
 }
 
 let state = loadState();
+let user = null;        // вошедший пользователь (с сервера) или null для гостя
+let syncTimer = null;
+
 function save() {
   try { localStorage.setItem(STORE_KEY, JSON.stringify(state)); } catch (e) { /* нет места / запрещено */ }
+  // Прогресс вошедшего пользователя сохраняется в базе (с задержкой, чтобы не слать запрос на каждый тик)
+  if (user) {
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(pushState, 1500);
+  }
+}
+
+function pushState() {
+  clearTimeout(syncTimer);
+  if (!user) return;
+  api('PUT', '/api/me/state', { state }).catch(() => { /* повторим при следующем сохранении */ });
+}
+
+async function api(method, path, body) {
+  const res = await fetch(CFG.API_BASE + path, {
+    method,
+    credentials: 'include',
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || 'Нет связи с сервером.');
+    err.status = res.status;
+    throw err;
+  }
+  return data;
 }
 
 function addPoints(n, reason) {
@@ -84,7 +114,7 @@ function addPoints(n, reason) {
 }
 
 // Ежедневная серия и бонус за вход
-(function checkStreak() {
+function checkStreak() {
   const t = today();
   if (state.lastVisit === t) return;
   const y = new Date(Date.now() - 864e5).toISOString().slice(0, 10);
@@ -95,7 +125,8 @@ function addPoints(n, reason) {
   state.points += bonus;
   save();
   setTimeout(() => toast(`День ${state.streak} подряд · +${bonus} очков`), 600);
-})();
+}
+checkStreak();
 
 function completeTask(event) {
   const task = D.tasks.find(t => t.event === event);
@@ -331,6 +362,7 @@ function renderCart() {
 }
 
 function checkout() {
+  if (!user) return requireLogin('Войдите, чтобы оформить заказ');
   const total = Object.entries(state.cart).reduce((a, [id, q]) => a + byId(D.products, id).price * q, 0);
   // Здесь будет создание заказа на сервере и оплата (ЮKassa / CloudPayments / Apple Pay).
   state.cart = {};
@@ -552,6 +584,7 @@ function claimDrop(id) {
     toast(`Дослушайте «${ep.title}»`);
     return;
   }
+  if (!user) return requireLogin('Войдите, чтобы забрать приз');
   const left = dropLeft(d);
   if (!left || state.points < d.cost || state.myPrizes.some(p => p.dropId === id)) return;
   if (!confirm(`Обменять ${d.cost} очков на «${d.name}»?`)) return;
@@ -718,13 +751,250 @@ async function askAI(t) {
 }
 
 // ══════════════════════════════
+// АККАУНТ
+// ══════════════════════════════
+let authView = 'login';   // login | register | verify | reset | reset-confirm
+let authEmail = '';
+let authBusy = false;
+
+function renderAll() {
+  renderHeader();
+  renderHome();
+  renderShop();
+  renderPodcasts();
+  renderChats();
+  renderPrizes();
+  renderProfile();
+  if (overlayStack.includes('cart-overlay')) renderCart();
+}
+
+function renderProfileButton() {
+  const btn = $('#profile-btn');
+  btn.classList.toggle('signed-in', !!user);
+  btn.innerHTML = user
+    ? esc((user.name || user.email)[0].toUpperCase())
+    : '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 3.6-7 8-7s8 3 8 7"/></svg>';
+}
+
+function requireLogin(reason) {
+  authView = 'login';
+  renderProfile();
+  openOverlay('profile-overlay');
+  toast(reason);
+}
+
+function field(name, label, type, attrs) {
+  return `<label class="field"><span>${label}</span><input name="${name}" type="${type}" ${attrs || ''}></label>`;
+}
+
+function renderProfile() {
+  renderProfileButton();
+  const body = $('#profile-body');
+  $('#profile-title').textContent = user ? 'Профиль' : 'Вход';
+
+  if (user) {
+    const prizes = state.myPrizes.length;
+    body.innerHTML = `
+      <div class="profile-head">
+        <div class="profile-avatar">${esc((user.name || user.email)[0].toUpperCase())}</div>
+        <div>
+          <div class="profile-name">${esc(user.name || 'Без имени')}</div>
+          <div class="profile-email">${esc(user.email)} ${user.emailVerified ? '<span class="verified">✓ подтверждён</span>' : ''}</div>
+        </div>
+      </div>
+      <div class="profile-stats">
+        <div><b>${state.points}</b><span>очков</span></div>
+        <div><b>${state.streak}</b><span>дней подряд</span></div>
+        <div><b>${prizes}</b><span>призов</span></div>
+      </div>
+      <form class="auth-form" data-form="profile">
+        ${field('name', 'Имя', 'text', `value="${esc(user.name)}" autocomplete="name" maxlength="80"`)}
+        ${field('city', 'Город', 'text', `value="${esc(user.city)}" autocomplete="address-level2" maxlength="80"`)}
+        ${field('phone', 'Телефон', 'tel', `value="${esc(user.phone)}" autocomplete="tel" maxlength="30"`)}
+        <label class="check"><input type="checkbox" name="isSeller" ${user.isSeller ? 'checked' : ''}> Я продаю свои товары</label>
+        <button class="btn primary" type="submit">Сохранить</button>
+      </form>
+      <div class="profile-actions">
+        <button class="btn" data-action="logout">Выйти</button>
+        <button class="link-btn danger" data-action="delete-account">Удалить аккаунт</button>
+      </div>`;
+    return;
+  }
+
+  const views = {
+    login: `
+      <div class="auth-lead">Войдите, чтобы оформлять заказы, забирать призы и не терять прогресс на другом устройстве.</div>
+      <div class="segmented"><button class="seg active">Вход</button><button class="seg" data-auth-view="register">Регистрация</button></div>
+      <form class="auth-form" data-form="login">
+        ${field('email', 'Email', 'email', `value="${esc(authEmail)}" autocomplete="email" required`)}
+        ${field('password', 'Пароль', 'password', 'autocomplete="current-password" required')}
+        <button class="btn primary" type="submit">Войти</button>
+        <button class="link-btn" type="button" data-auth-view="reset">Забыли пароль?</button>
+      </form>`,
+    register: `
+      <div class="auth-lead">Регистрация займёт минуту. На почту придёт код подтверждения.</div>
+      <div class="segmented"><button class="seg" data-auth-view="login">Вход</button><button class="seg active">Регистрация</button></div>
+      <form class="auth-form" data-form="register">
+        ${field('name', 'Имя', 'text', 'autocomplete="name" maxlength="80"')}
+        ${field('email', 'Email', 'email', `value="${esc(authEmail)}" autocomplete="email" required`)}
+        ${field('password', 'Пароль (от 8 символов)', 'password', 'autocomplete="new-password" minlength="8" required')}
+        <button class="btn primary" type="submit">Зарегистрироваться</button>
+        <div class="auth-note">Регистрируясь, вы соглашаетесь с правилами сервиса и обработкой персональных данных.</div>
+      </form>`,
+    verify: `
+      <div class="auth-lead">Мы отправили 6-значный код на <b>${esc(authEmail)}</b>. Проверьте папку «Спам», если письма нет.</div>
+      <form class="auth-form" data-form="verify">
+        ${field('code', 'Код из письма', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required class="code-input"')}
+        <button class="btn primary" type="submit">Подтвердить</button>
+        <button class="link-btn" type="button" data-action="resend-code">Отправить код ещё раз</button>
+        <button class="link-btn" type="button" data-auth-view="login">← Назад</button>
+      </form>`,
+    reset: `
+      <div class="auth-lead">Укажите почту — пришлём код для сброса пароля.</div>
+      <form class="auth-form" data-form="reset">
+        ${field('email', 'Email', 'email', `value="${esc(authEmail)}" autocomplete="email" required`)}
+        <button class="btn primary" type="submit">Получить код</button>
+        <button class="link-btn" type="button" data-auth-view="login">← Назад</button>
+      </form>`,
+    'reset-confirm': `
+      <div class="auth-lead">Если аккаунт с адресом <b>${esc(authEmail)}</b> существует, мы отправили на него код.</div>
+      <form class="auth-form" data-form="reset-confirm">
+        ${field('code', 'Код из письма', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required class="code-input"')}
+        ${field('password', 'Новый пароль (от 8 символов)', 'password', 'autocomplete="new-password" minlength="8" required')}
+        <button class="btn primary" type="submit">Сменить пароль</button>
+        <button class="link-btn" type="button" data-auth-view="reset">← Назад</button>
+      </form>`,
+  };
+  body.innerHTML = views[authView] + '<div class="form-error" id="auth-error"></div>';
+}
+
+// Пользователь вошёл: подтягиваем прогресс из базы или переносим туда гостевой
+function applyLogin(data, quiet) {
+  user = data.user;
+  if (data.state && data.state.v === 1) {
+    state = data.state;
+    checkStreak();
+  } else {
+    pushState();
+  }
+  save();
+  renderAll();
+  if (!quiet) toast(`Добро пожаловать${user.name ? ', ' + user.name : ''}!`);
+}
+
+async function submitAuthForm(form) {
+  if (authBusy) return;
+  const f = Object.fromEntries(new FormData(form));
+  const errBox = $('#auth-error');
+  if (errBox) errBox.textContent = '';
+  authBusy = true;
+  form.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    switch (form.dataset.form) {
+      case 'login': {
+        authEmail = f.email.trim();
+        const r = await api('POST', '/api/auth/login', { email: f.email, password: f.password });
+        if (r.needVerify) { authView = 'verify'; renderProfile(); toast('Подтвердите почту — код отправлен'); }
+        else { applyLogin(r); closeOverlay('profile-overlay'); }
+        break;
+      }
+      case 'register': {
+        authEmail = f.email.trim();
+        await api('POST', '/api/auth/register', { email: f.email, password: f.password, name: f.name });
+        authView = 'verify';
+        renderProfile();
+        break;
+      }
+      case 'verify': {
+        const r = await api('POST', '/api/auth/verify', { email: authEmail, code: f.code });
+        applyLogin(r);
+        closeOverlay('profile-overlay');
+        break;
+      }
+      case 'reset':
+        authEmail = f.email.trim();
+        await api('POST', '/api/auth/reset/request', { email: f.email });
+        authView = 'reset-confirm';
+        renderProfile();
+        break;
+      case 'reset-confirm': {
+        const r = await api('POST', '/api/auth/reset/confirm', { email: authEmail, code: f.code, password: f.password });
+        applyLogin(r, true);
+        toast('Пароль изменён');
+        closeOverlay('profile-overlay');
+        break;
+      }
+      case 'profile': {
+        const r = await api('PATCH', '/api/me', { name: f.name, city: f.city, phone: f.phone, isSeller: !!f.isSeller });
+        user = r.user;
+        renderProfile();
+        toast('Сохранено');
+        break;
+      }
+    }
+  } catch (e) {
+    const box = $('#auth-error');
+    if (box) box.textContent = e.message; else toast(e.message);
+    if (e.status === 401 && form.dataset.form === 'profile') { user = null; renderAll(); }
+  } finally {
+    authBusy = false;
+    form.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+async function logout() {
+  pushState();
+  try { await api('POST', '/api/auth/logout'); } catch (e) { /* всё равно выходим локально */ }
+  user = null;
+  // На общем устройстве данные прошлого пользователя не должны оставаться
+  state = initialState();
+  checkStreak();
+  save();
+  authView = 'login';
+  renderAll();
+  closeOverlay('profile-overlay');
+  toast('Вы вышли из аккаунта');
+}
+
+async function deleteAccount() {
+  const password = prompt('Удаление аккаунта необратимо: профиль, очки и призы будут стёрты.\nВведите пароль для подтверждения:');
+  if (!password) return;
+  try {
+    await api('DELETE', '/api/me', { password });
+  } catch (e) {
+    return toast(e.message);
+  }
+  user = null;
+  state = initialState();
+  checkStreak();
+  save();
+  authView = 'login';
+  renderAll();
+  closeOverlay('profile-overlay');
+  toast('Аккаунт удалён');
+}
+
+document.addEventListener('submit', e => {
+  const form = e.target.closest('form[data-form]');
+  if (!form) return;
+  e.preventDefault();
+  submitAuthForm(form);
+});
+
+// ══════════════════════════════
 // СОБЫТИЯ
 // ══════════════════════════════
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-show],[data-play],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg]');
+  const el = e.target.closest('[data-auth-view],[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-show],[data-play],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg]');
   if (!el) return;
   const ds = el.dataset;
 
+  if (ds.authView) {
+    const input = $('#profile-body input[name=email]');
+    if (input && input.value) authEmail = input.value.trim();
+    authView = ds.authView;
+    return renderProfile();
+  }
   if (ds.tab) return switchTab(ds.tab);
   if (ds.go) return switchTab(ds.go);
   if (ds.close !== undefined) return closeOverlay(el.closest('[data-overlay]').id);
@@ -767,6 +1037,13 @@ document.addEventListener('click', e => {
   switch (ds.action) {
     case 'open-ai': return openThread('ai');
     case 'open-cart': renderCart(); return openOverlay('cart-overlay');
+    case 'open-profile': renderProfile(); return openOverlay('profile-overlay');
+    case 'logout': return logout();
+    case 'delete-account': return deleteAccount();
+    case 'resend-code':
+      return api('POST', '/api/auth/resend', { email: authEmail })
+        .then(() => toast('Код отправлен ещё раз'))
+        .catch(err => toast(err.message));
     case 'checkout': return checkout();
     case 'become-seller':
       openThread('ai');
@@ -813,17 +1090,15 @@ setInterval(() => {
 }, 30e3);
 
 // Сохраняем позицию плеера при сворачивании приложения
-document.addEventListener('visibilitychange', () => { if (document.hidden) save(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { save(); pushState(); } });
 
 // ══════════════════════════════
 // СТАРТ
 // ══════════════════════════════
-renderHeader();
-renderHome();
-renderShop();
-renderPodcasts();
-renderChats();
-renderPrizes();
+renderAll();
+
+// Если есть активная сессия — подтягиваем профиль и прогресс из базы
+api('GET', '/api/me').then(r => applyLogin(r, true)).catch(() => { /* гость */ });
 
 // Глубокие ссылки: #shop, #podcasts, #chats, #prizes, #ai, #product=p1
 (function handleHash() {
@@ -832,6 +1107,7 @@ renderPrizes();
   const [k, v] = h.split('=');
   if (k === 'product' && byId(D.products, v)) openProduct(v);
   else if (['home', 'shop', 'podcasts', 'chats', 'prizes', 'ai'].includes(k)) switchTab(k);
+  else if (k === 'login') { renderProfile(); openOverlay('profile-overlay'); }
 })();
 
 if ('serviceWorker' in navigator && location.protocol === 'https:') {
@@ -839,5 +1115,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // Доступ для нативной оболочки (например, открыть вкладку из push-уведомления)
-window.App = { switchTab, openProduct, openThread, playEpisode };
+window.App = { switchTab, openProduct, openThread, playEpisode, openProfile: () => { renderProfile(); openOverlay('profile-overlay'); } };
 })();

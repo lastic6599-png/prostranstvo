@@ -10,9 +10,13 @@ RUN mkdir -p /certs && cd /certs \
   || (echo "WARN: сертификаты Минцифры не скачаны — GigaChat работать не будет" && touch russian_trusted_ca.pem))
 ENV NODE_EXTRA_CA_CERTS=/certs/russian_trusted_ca.pem
 
-COPY package.json ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
 COPY server ./server
 COPY public ./public
+
+# Папка для SQLite, если DATABASE_URL не задан (лучше подключить Postgres)
+RUN mkdir -p /app/data && chown node:node /app/data
 
 ENV NODE_ENV=production PORT=3000
 EXPOSE 3000

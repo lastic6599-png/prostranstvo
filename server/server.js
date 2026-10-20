@@ -1,5 +1,5 @@
-// Мини-сервер без зависимостей: отдаёт public/ и проксирует запросы к ИИ.
-// Ключ API хранится только здесь (в переменной окружения), а не в браузере.
+// Сервер Пространства: отдаёт public/, аккаунты пользователей (/api/auth, /api/me) и прокси к ИИ.
+// Ключи API хранятся только здесь (в переменных окружения), а не в браузере.
 //
 // Запуск:  npm start  (настройки — в .env, см. .env.example)
 'use strict';
@@ -13,8 +13,15 @@ loadDotEnv(path.join(__dirname, '..', '.env'));
 const PORT = +process.env.PORT || 3000;
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const { pickProvider } = require('./ai');
+const { createDb } = require('./db');
+const { createAuth, HttpError } = require('./auth');
+
+const db = createDb();
+const auth = createAuth(db);
 // За nginx / балансировщиком реальный IP берём из X-Forwarded-For
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
+// Попыток входа / регистрации / ввода кода в минуту с одного IP
+const AUTH_RATE_LIMIT = +process.env.AUTH_RATE_LIMIT || 10;
 // Через запятую; '*' — разрешить всем (удобно для разработки iOS-оболочки)
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean);
 
@@ -37,19 +44,19 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4',
 };
 
-// Простое ограничение частоты: 20 запросов к ИИ в минуту с одного IP
+// Простое ограничение частоты запросов с одного IP (в памяти процесса)
 const hits = new Map();
 setInterval(() => hits.clear(), 10 * 60e3).unref();
 function clientIp(req) {
   if (TRUST_PROXY && req.headers['x-forwarded-for']) return req.headers['x-forwarded-for'].split(',')[0].trim();
   return req.socket.remoteAddress;
 }
-function rateLimited(ip) {
+function rateLimited(key, perMinute) {
   const now = Date.now();
-  const list = (hits.get(ip) || []).filter(t => now - t < 60e3);
+  const list = (hits.get(key) || []).filter(t => now - t < 60e3);
   list.push(now);
-  hits.set(ip, list);
-  return list.length > 20;
+  hits.set(key, list);
+  return list.length > perMinute;
 }
 
 function setCors(req, res) {
@@ -58,7 +65,8 @@ function setCors(req, res) {
   if (ALLOWED_ORIGINS.includes('*') || ALLOWED_ORIGINS.includes(origin)) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
-    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   }
 }
@@ -82,13 +90,10 @@ function readBody(req, limit = 64 * 1024) {
   });
 }
 
-async function handleAI(req, res) {
+async function handleAI(req, res, body) {
   const provider = pickProvider();
   if (!provider || !provider.configured()) return sendJson(res, 503, { error: 'ИИ-ассистент пока не подключён. Загляните чуть позже.' });
-  if (rateLimited(clientIp(req))) return sendJson(res, 429, { error: 'Слишком много вопросов подряд. Подождите минуту.' });
-
-  let body;
-  try { body = JSON.parse(await readBody(req)); } catch (e) { return sendJson(res, 400, { error: 'Некорректный запрос.' }); }
+  if (rateLimited('ai:' + clientIp(req), 20)) return sendJson(res, 429, { error: 'Слишком много вопросов подряд. Подождите минуту.' });
 
   const messages = (Array.isArray(body.messages) ? body.messages : [])
     .filter(m => m && (m.role === 'user' || m.role === 'assistant') && typeof m.content === 'string')
@@ -111,7 +116,8 @@ async function handleAI(req, res) {
 }
 
 function serveStatic(req, res) {
-  const urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname);
+  let urlPath;
+  try { urlPath = decodeURIComponent(new URL(req.url, 'http://x').pathname); } catch (e) { res.writeHead(400); return res.end(); }
   let file = path.normalize(path.join(PUBLIC_DIR, urlPath));
   if (!file.startsWith(PUBLIC_DIR)) { res.writeHead(403); return res.end(); }
   if (urlPath.endsWith('/')) file = path.join(file, 'index.html');
@@ -125,22 +131,56 @@ function serveStatic(req, res) {
   });
 }
 
+async function handleApi(req, res, pathname) {
+  const key = `${req.method} ${pathname}`;
+  const handler = key === 'POST /api/ai' ? handleAI : auth.routes[key];
+  if (!handler) return sendJson(res, 404, { error: 'Не найдено.' });
+
+  let body = {};
+  if (req.method !== 'GET') {
+    // Только JSON: обычная HTML-форма с чужого сайта не сможет отправить такой запрос (защита от CSRF)
+    if (!/^application\/json\b/.test(req.headers['content-type'] || '')) return sendJson(res, 415, { error: 'Нужен JSON.' });
+    try { body = JSON.parse((await readBody(req, 300 * 1024)) || '{}') || {}; } catch (e) { return sendJson(res, 400, { error: 'Некорректный запрос.' }); }
+  }
+  if (key === 'POST /api/ai') return handleAI(req, res, body);
+
+  if (pathname.startsWith('/api/auth/') && key !== 'POST /api/auth/logout' && rateLimited('auth:' + clientIp(req), AUTH_RATE_LIMIT)) {
+    return sendJson(res, 429, { error: 'Слишком много попыток. Подождите минуту.' });
+  }
+  try {
+    sendJson(res, 200, await handler(req, res, body));
+  } catch (e) {
+    if (e instanceof HttpError) return sendJson(res, e.status, Object.assign({ error: e.message }, e.extra));
+    console.error(key, e);
+    sendJson(res, 500, { error: 'Ошибка сервера. Попробуйте позже.' });
+  }
+}
+
 const server = http.createServer((req, res) => {
   setCors(req, res);
   if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
-  if (req.url === '/api/ai' && req.method === 'POST') return handleAI(req, res);
-  if (req.url === '/api/health') {
+  const pathname = req.url.split('?')[0];
+  if (pathname === '/api/health') {
     const p = pickProvider();
-    return sendJson(res, 200, { ok: true, ai: p && p.configured() ? p.name : null });
+    return sendJson(res, 200, { ok: true, db: db.kind, ai: p && p.configured() ? p.name : null });
   }
+  if (pathname.startsWith('/api/')) return handleApi(req, res, pathname);
   if (req.method === 'GET' || req.method === 'HEAD') return serveStatic(req, res);
   res.writeHead(405); res.end();
 });
 
-server.listen(PORT, () => {
-  console.log(`Пространство: http://localhost:${PORT}`);
-  const p = pickProvider();
-  console.log(p && p.configured() ? `ИИ: ${p.name}` : '⚠ ИИ не настроен — заполните YANDEX_* или GIGACHAT_* в .env');
+db.migrate().then(() => {
+  setInterval(() => auth.cleanup().catch(e => console.error('cleanup', e.message)), 3600e3).unref();
+  server.listen(PORT, () => {
+    console.log(`Пространство: http://localhost:${PORT}`);
+    console.log(`База данных: ${db.kind}`);
+    const p = pickProvider();
+    console.log(p && p.configured() ? `ИИ: ${p.name}` : '⚠ ИИ не настроен — заполните YANDEX_* или GIGACHAT_* в .env');
+    if (!require('./mail').mailConfigured()) console.log('⚠ SMTP не настроен — коды подтверждения печатаются в консоль');
+  });
+}).catch(e => {
+  console.error('Не удалось подключиться к базе данных:', e.message);
+  process.exit(1);
 });
 
 function loadDotEnv(file) {

@@ -38,6 +38,7 @@
       <svg viewBox="0 0 24 24"><path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/></svg>
       <div class="badge" id="cart-badge" hidden>0</div>
     </button>
+    <button class="icon-btn profile-btn" id="profile-btn" data-action="open-profile" aria-label="Профиль"></button>
   </div>
 </nav>
 
@@ -198,6 +199,15 @@
     <div class="overlay-title">Корзина</div>
   </div>
   <div class="overlay-body" id="cart-body"></div>
+</div>
+
+<!-- ПРОФИЛЬ / ВХОД -->
+<div class="overlay" id="profile-overlay" data-overlay>
+  <div class="overlay-topbar">
+    <button class="overlay-back" data-close>←</button>
+    <div class="overlay-title" id="profile-title">Вход</div>
+  </div>
+  <div class="overlay-body padded" id="profile-body"></div>
 </div>
 
 <!-- ЧАТ (диалог) -->

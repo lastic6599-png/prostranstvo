@@ -619,3 +619,50 @@ body.has-player .page { padding-bottom: 76px; }
   background: var(--gold); color: var(--ink); font-size: .52rem; font-weight: 600;
   display: flex; align-items: center; justify-content: center;
 }
+
+/* ── АККАУНТ ── */
+.profile-btn { background: transparent; border: 1px solid rgba(13,12,10,.25); color: var(--ink); }
+.profile-btn svg { stroke: var(--ink); }
+.profile-btn.signed-in {
+  background: var(--gold); border-color: var(--gold);
+  font-family: 'Cormorant Garamond', serif; font-size: 1.05rem; font-weight: 600;
+}
+.top-actions { gap: .4rem; }
+.auth-lead { font-size: .8rem; font-weight: 300; line-height: 1.6; color: var(--muted); margin: 1.4rem 0 1.2rem; }
+.auth-lead b { color: var(--ink); font-weight: 500; }
+.auth-form { display: flex; flex-direction: column; gap: .9rem; margin-top: 1.2rem; }
+.field { display: flex; flex-direction: column; gap: .35rem; }
+.field span { font-size: .6rem; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+.field input {
+  padding: .8rem .9rem; border: 1px solid rgba(0,0,0,.14); border-radius: 3px;
+  background: var(--cream); font-family: inherit; font-size: 16px; color: var(--ink); outline: none;
+  -webkit-appearance: none;
+}
+.field input:focus { border-color: var(--gold); }
+.field input.code-input { font-size: 1.6rem; letter-spacing: .5em; text-align: center; font-weight: 500; }
+.check { display: flex; align-items: center; gap: .6rem; font-size: .8rem; }
+.check input { width: 18px; height: 18px; accent-color: var(--gold); }
+.link-btn {
+  background: none; border: none; cursor: pointer; color: var(--gold);
+  font-size: .72rem; padding: .3rem; align-self: center;
+}
+.link-btn.danger { color: var(--danger); }
+.auth-note { font-size: .62rem; color: var(--muted); line-height: 1.5; text-align: center; }
+.form-error { color: var(--danger); font-size: .76rem; text-align: center; min-height: 1.2em; margin-top: .9rem; }
+.profile-head { display: flex; align-items: center; gap: 1rem; margin: 1.6rem 0 1.2rem; }
+.profile-avatar {
+  width: 58px; height: 58px; border-radius: 50%; background: var(--ink); color: var(--gold);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'Cormorant Garamond', serif; font-size: 1.6rem;
+}
+.profile-name { font-family: 'Cormorant Garamond', serif; font-size: 1.35rem; }
+.profile-email { font-size: .72rem; color: var(--muted); }
+.verified { color: var(--gold); margin-left: .3rem; }
+.profile-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: rgba(0,0,0,.07);
+  border: 1px solid rgba(0,0,0,.07); border-radius: 4px; overflow: hidden;
+}
+.profile-stats div { background: var(--cream); padding: .8rem; text-align: center; }
+.profile-stats b { display: block; font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 400; color: var(--gold); }
+.profile-stats span { font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.profile-actions { display: flex; flex-direction: column; gap: .6rem; margin: 1.6rem 0 2rem; }
