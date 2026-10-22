@@ -19,16 +19,35 @@ const rub = n => Math.round(n).toLocaleString('ru-RU') + ' ₽';
 const pct = r => Math.round(r * 100) + '%';
 const today = () => new Date().toISOString().slice(0, 10);
 const nowTime = () => new Date().toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
-const mmss = s => { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); };
+// Склонение: plural(5, 'очко', 'очка', 'очков') → 'очков'
+function plural(n, one, few, many) {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b > 1 && b < 5) return few;
+  if (b === 1) return one;
+  return many;
+}
+const pts = n => `${n} ${plural(n, 'очко', 'очка', 'очков')}`;
+const daysWord = n => plural(n, 'день', 'дня', 'дней');
+function ago(ts) {
+  const m = Math.floor((Date.now() - ts) / 60e3);
+  if (m < 1) return 'только что';
+  if (m < 60) return `${m} мин назад`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h} ч назад`;
+  const d = Math.floor(h / 24);
+  return d === 1 ? 'вчера' : `${d} ${plural(d, 'день', 'дня', 'дней')} назад`;
+}
 const byId = (list, id) => list.find(x => x.id === id);
 
 let toastTimer;
-function toast(text) {
+// kind: '' — обычное уведомление, 'streak' — бонус за серию дней
+function toast(text, kind) {
   const t = $('#toast');
   t.textContent = text;
-  t.classList.add('show');
+  t.className = 'toast show' + (kind ? ' ' + kind : '');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => t.classList.remove('show'), 2600);
+  toastTimer = setTimeout(() => t.classList.remove('show'), kind === 'streak' ? 3600 : 2600);
 }
 
 // ══════════════════════════════
@@ -51,7 +70,8 @@ function initialState() {
     cart: {},
     following: { c1: true },
     chats,
-    episodes: {},
+    posts: [],        // посты пользователя в ленте
+    likes: {},        // id поста → true
     dropsLeft: {},
     myPrizes: [],
     streak: 0,
@@ -62,10 +82,18 @@ function initialState() {
   };
 }
 
+// Дополняет сохранённое состояние полями, которых не было в старых версиях
+function normalizeState(s) {
+  const base = initialState();
+  for (const k of Object.keys(base)) if (s[k] === undefined) s[k] = base[k];
+  delete s.episodes; // раздел подкастов убран
+  return s;
+}
+
 function loadState() {
   try {
     const s = JSON.parse(localStorage.getItem(STORE_KEY));
-    if (s && s.v === 1) return s;
+    if (s && s.v === 1) return normalizeState(s);
   } catch (e) { /* приватный режим или битые данные */ }
   return initialState();
 }
@@ -109,7 +137,7 @@ function addPoints(n, reason) {
   state.points += n;
   save();
   renderHeader();
-  if (reason) toast(`+${n} очков · ${reason}`);
+  if (reason) toast(`+${pts(n)} · ${reason}`);
   Native.haptic('success');
 }
 
@@ -124,7 +152,10 @@ function checkStreak() {
   const bonus = Math.min(state.streak, 7) * 2;
   state.points += bonus;
   save();
-  setTimeout(() => toast(`День ${state.streak} подряд · +${bonus} очков`), 600);
+  const text = state.streak === 1
+    ? `Первый день серии · +${pts(bonus)}`
+    : `Серия: ${state.streak} ${daysWord(state.streak)} подряд · +${pts(bonus)}`;
+  setTimeout(() => toast(text, 'streak'), 900);
 }
 checkStreak();
 
@@ -193,6 +224,7 @@ function unreadCount() { return state.chats.reduce((a, c) => a + (c.unread || 0)
 function renderHeader() {
   $('#points-value').textContent = state.points;
   $('#ach-points').textContent = state.points;
+  $('#ach-points-label').textContent = plural(state.points, 'очко', 'очка', 'очков');
   const cc = cartCount();
   $('#cart-badge').hidden = !cc;
   $('#cart-badge').textContent = cc;
@@ -267,14 +299,12 @@ function requestCard(r) {
 function allRequests() { return state.userRequests.concat(D.requests); }
 
 function renderHome() {
-  $('#hero-commission').textContent = 'от ' + pct(CFG.COMMISSION);
+  $('#hero-commission').textContent = 'до ' + pct(CFG.COMMISSION);
   $('#today-date').textContent = new Date().toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
   $('#home-drops-left').textContent = D.drops.reduce((a, d) => a + dropLeft(d), 0);
   renderCommission();
-  $('#home-episode').innerHTML = episodeRow(D.episodes[0]);
   $('#home-products').innerHTML = D.products.slice(0, 6).map(productCard).join('');
-  $('#community-cases').innerHTML = D.cases.map(caseCard).join('');
-  $('#requests-list').innerHTML = allRequests().map(requestCard).join('');
+  $('#home-posts').innerHTML = allPosts().slice(0, 2).map(postCard).join('');
 }
 
 // ══════════════════════════════
@@ -284,7 +314,7 @@ let shopCategory = 'Все';
 let shopQuery = '';
 
 function renderShop() {
-  $('#shop-badge').textContent = `Комиссия площадки — ${pct(CFG.COMMISSION)}`;
+  $('#shop-badge').textContent = `Комиссия площадки — до ${pct(CFG.COMMISSION)}`;
   $('#banner-commission').textContent = pct(CFG.COMMISSION);
   $('#shop-filter').innerHTML = D.categories.map(c =>
     `<button class="filter-chip${c === shopCategory ? ' active' : ''}" data-category="${esc(c)}">${esc(c)}</button>`).join('');
@@ -311,7 +341,7 @@ function openProduct(id) {
       </div>
       <div class="pd-desc">${esc(p.desc)}</div>
       <div class="pd-split">Из ${rub(p.price)} мастер получит <b>${rub(p.price - fee)}</b>, площадка — ${rub(fee)} (${pct(CFG.COMMISSION)}).</div>
-      <div class="pd-points">+${Math.floor(p.price / CFG.RUB_PER_POINT)} очков за покупку</div>
+      <div class="pd-points">+${pts(Math.floor(p.price / CFG.RUB_PER_POINT))} за покупку</div>
       <div class="btn-row">
         <button class="btn" data-chat-seller="${p.seller}" data-chat-product="${p.id}">Написать</button>
         <button class="btn primary" data-add-cart="${p.id}">В корзину</button>
@@ -373,149 +403,104 @@ function checkout() {
 }
 
 // ══════════════════════════════
-// ПОДКАСТЫ + ПЛЕЕР
+// СООБЩЕСТВО
 // ══════════════════════════════
-let podShow = 'Все';
-const ICON_PLAY = '<svg viewBox="0 0 24 24" class="fill"><polygon points="7 4 20 12 7 20"/></svg>';
-const ICON_PAUSE = '<svg viewBox="0 0 24 24" class="fill"><rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/></svg>';
+let commTopic = 'Все';
+let commSeg = 'feed';
+let postTopic = null;
+const ICON_HEART = '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 017-2.6A4 4 0 0119 10c0 5.6-7 10-7 10z"/></svg>';
+const ICON_REPLY = '<svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>';
 
-function epState(id) {
-  return state.episodes[id] || (state.episodes[id] = { pos: 0, listened: 0, done: false });
+function person(id) { return D.sellers[id] || D.members[id] || { name: 'Участник', role: '' }; }
+
+// Посты пользователя сверху, затем лента сообщества
+function allPosts() {
+  const mine = state.posts.map(p => Object.assign({ mine: true, likes: 0, comments: 0 }, p));
+  return mine.concat(D.posts);
 }
 
-function episodeRow(ep) {
-  const st = epState(ep.id);
-  const playing = player.epId === ep.id && player.playing;
-  const drop = ep.unlocks && byId(D.drops, ep.unlocks);
-  return `<div class="episode">
-    <div class="ep-cover">${ep.emoji}</div>
-    <div class="ep-body">
-      ${drop ? `<div class="ep-drop">Открывает дроп</div>` : ''}
-      <div class="ep-show">${esc(ep.show)} · ${esc(ep.date)}</div>
-      <div class="ep-title">${esc(ep.title)}</div>
-      <div class="ep-desc">${esc(ep.desc)}</div>
-      <div class="ep-foot">
-        <button class="ep-play" data-play="${ep.id}">${playing ? ICON_PAUSE : ICON_PLAY}${playing ? 'Пауза' : st.pos > 0 && !st.done ? 'Продолжить' : 'Слушать'}</button>
-        <span class="ep-meta">${Math.round(ep.duration / 60)} мин</span>
-        <span class="ep-reward${st.done ? ' done' : ''}">${st.done ? '✓ очки получены' : `+${ep.points} очков`}</span>
+function postCard(p) {
+  const who = p.mine
+    ? { name: user && user.name ? user.name : 'Вы', role: user && user.city ? user.city : 'Участник' }
+    : person(p.author);
+  const liked = !!state.likes[p.id];
+  const likes = (p.likes || 0) + (liked ? 1 : 0);
+  return `<article class="post">
+    <div class="post-head">
+      <div class="case-avatar">${esc(who.name[0])}</div>
+      <div class="post-meta">
+        <div class="post-name">${esc(who.name)}</div>
+        <div class="post-role">${esc(who.role)}${who.role ? ' · ' : ''}${esc(p.mine ? ago(p.at) : p.when)}</div>
       </div>
-      <div class="ep-progress"><div data-ep-progress="${ep.id}" style="width:${st.pos / ep.duration * 100}%"></div></div>
     </div>
-  </div>`;
+    <div class="post-text">${esc(p.text)}</div>
+    <div class="post-actions">
+      <button class="post-act${liked ? ' liked' : ''}" data-like="${p.id}" aria-label="Нравится">${ICON_HEART}<span>${likes}</span></button>
+      ${p.mine
+        ? '<span class="post-mine">Ваш пост</span>'
+        : `<button class="post-act" data-reply="${p.id}">${ICON_REPLY}<span>${p.comments ? p.comments + ' · ' : ''}Обсудить</span></button>`}
+      <span class="post-topic">${esc(p.topic)}</span>
+    </div>
+  </article>`;
 }
 
-function renderPodcasts() {
-  $('#pod-filter').innerHTML = D.shows.map(s =>
-    `<button class="filter-chip${s === podShow ? ' active' : ''}" data-show="${esc(s)}">${esc(s)}</button>`).join('');
-  $('#episode-list').innerHTML = D.episodes.filter(e => podShow === 'Все' || e.show === podShow).map(episodeRow).join('');
-  $('#home-episode').innerHTML = episodeRow(D.episodes[0]);
+function renderCommunity() {
+  $$('#community-tabs .seg').forEach(b => b.classList.toggle('active', b.dataset.seg === commSeg));
+  $('#comm-feed').hidden = commSeg !== 'feed';
+  $('#comm-cases').hidden = commSeg !== 'cases';
+  $('#comm-requests').hidden = commSeg !== 'requests';
+
+  $('#topic-filter').innerHTML = D.topics.map(t =>
+    `<button class="filter-chip${t === commTopic ? ' active' : ''}" data-topic="${esc(t)}">${esc(t)}</button>`).join('');
+  const list = allPosts().filter(p => commTopic === 'Все' || p.topic === commTopic);
+  $('#post-list').innerHTML = list.map(postCard).join('');
+  $('#post-empty').hidden = list.length > 0;
+  $('#community-cases').innerHTML = D.cases.map(caseCard).join('');
+  $('#requests-list').innerHTML = allRequests().map(requestCard).join('');
 }
 
-const player = { epId: null, playing: false, timer: null, audio: null, lastTime: 0, lastSave: 0 };
-
-function playEpisode(id) {
-  if (player.epId === id) { player.playing ? pausePlayer() : resumePlayer(); return; }
-  stopPlayer();
-  const ep = byId(D.episodes, id);
-  const st = epState(id);
-  if (st.pos >= ep.duration) st.pos = 0;
-  player.epId = id;
-  if (ep.audio) {
-    player.audio = new Audio(ep.audio);
-    player.audio.currentTime = st.pos;
-    player.lastTime = st.pos;
-    player.audio.addEventListener('timeupdate', onAudioTime);
-    player.audio.addEventListener('ended', () => { pausePlayer(); });
-  }
-  $('#mini-player').hidden = false;
-  document.body.classList.add('has-player');
-  resumePlayer();
-}
-
-function resumePlayer() {
-  player.playing = true;
-  if (player.audio) {
-    player.audio.play().catch(() => { player.playing = false; updatePlayerUI(); });
-  } else {
-    // Демо-режим без аудиофайла: имитируем воспроизведение
-    clearInterval(player.timer);
-    player.timer = setInterval(() => advance(0.25 * CFG.DEMO_PLAYBACK_RATE, true), 250);
-  }
-  updatePlayerUI();
-  renderPodcasts();
-}
-
-function pausePlayer() {
-  player.playing = false;
-  clearInterval(player.timer);
-  if (player.audio) player.audio.pause();
+function toggleLike(id) {
+  if (state.likes[id]) delete state.likes[id]; else state.likes[id] = true;
   save();
-  updatePlayerUI();
-  renderPodcasts();
+  Native.haptic('light');
+  renderCommunity();
+  renderHome();
 }
 
-function stopPlayer() {
-  if (!player.epId) return;
-  pausePlayer();
-  if (player.audio) { player.audio.src = ''; player.audio = null; }
-  player.epId = null;
+function openComposer() {
+  postTopic = postTopic || D.topics[1];
+  renderComposer();
+  openOverlay('post-overlay');
+  setTimeout(() => $('#post-text').focus(), 300);
 }
 
-function onAudioTime() {
-  const t = player.audio.currentTime;
-  const delta = t - player.lastTime;
-  player.lastTime = t;
-  // Перемотка не засчитывается как прослушивание
-  advance(delta, delta > 0 && delta < 2, t);
+function renderComposer() {
+  $('#post-topics').innerHTML = D.topics.slice(1).map(t =>
+    `<button type="button" class="filter-chip${t === postTopic ? ' active' : ''}" data-post-topic="${esc(t)}">${esc(t)}</button>`).join('');
+  const len = $('#post-text').value.length;
+  $('#post-count').textContent = `${len} / ${CFG.POST_MAX_LENGTH}`;
+  $('#post-count').classList.toggle('over', len > CFG.POST_MAX_LENGTH);
+  const task = D.tasks.find(t => t.event === 'post_created');
+  $('#post-hint').textContent = task && !state.tasksDone[task.id] ? `+${pts(task.points)} за первый пост сегодня` : '';
 }
 
-// delta — на сколько секунд сдвинулась позиция; listened — считать ли это прослушиванием
-function advance(delta, listened, absolutePos) {
-  const ep = byId(D.episodes, player.epId);
-  const st = epState(ep.id);
-  st.pos = Math.min(ep.duration, absolutePos != null ? absolutePos : st.pos + delta);
-  if (listened) st.listened = Math.min(ep.duration, st.listened + delta);
-  if (!st.done && st.listened >= ep.duration * CFG.LISTEN_THRESHOLD) finishEpisode(ep);
-  if (st.pos >= ep.duration && !player.audio) pausePlayer();
-  if (Date.now() - player.lastSave > 2000) { player.lastSave = Date.now(); save(); }
-  updatePlayerUI();
-}
-
-function forward30() {
-  if (!player.epId) return;
-  const ep = byId(D.episodes, player.epId);
-  if (player.audio) {
-    player.audio.currentTime = Math.min(ep.duration, player.audio.currentTime + 30);
-  } else {
-    advance(30, false);
-  }
-}
-
-function finishEpisode(ep) {
-  const st = epState(ep.id);
-  st.done = true;
-  addPoints(ep.points, 'выпуск прослушан');
-  completeTask('episode_done');
-  if (ep.unlocks) {
-    const d = byId(D.drops, ep.unlocks);
-    setTimeout(() => toast(`Открыт дроп «${d.name}»`), 2800);
-  }
-  Native.event('episode_done', { id: ep.id });
-  renderPodcasts();
-  renderPrizes();
-}
-
-function updatePlayerUI() {
-  if (!player.epId) { $('#mini-player').hidden = true; document.body.classList.remove('has-player'); return; }
-  const ep = byId(D.episodes, player.epId);
-  const st = epState(ep.id);
-  const p = st.pos / ep.duration * 100;
-  $('#mp-cover').textContent = ep.emoji;
-  $('#mp-title').textContent = ep.title;
-  $('#mp-meta').textContent = `${mmss(st.pos)} / ${mmss(ep.duration)} · ${st.done ? 'очки получены' : `слушай до конца: +${ep.points}`}`;
-  $('#mp-fill').style.width = p + '%';
-  $('#mp-toggle').innerHTML = player.playing ? ICON_PAUSE : ICON_PLAY;
-  $$(`[data-ep-progress="${ep.id}"]`).forEach(el => { el.style.width = p + '%'; });
+function publishPost() {
+  const text = $('#post-text').value.trim();
+  if (text.length < 10) return toast('Напишите хотя бы пару предложений');
+  if (text.length > CFG.POST_MAX_LENGTH) return toast(`Не больше ${CFG.POST_MAX_LENGTH} символов`);
+  if (!user) return requireLogin('Войдите, чтобы публиковать посты');
+  // В продакшене пост уходит на сервер и проходит проверку на спам и стоп-слова.
+  state.posts.unshift({ id: 'u' + Date.now(), author: 'me', topic: postTopic, text, at: Date.now() });
+  save();
+  $('#post-text').value = '';
+  closeOverlay('post-overlay');
+  commSeg = 'feed';
+  commTopic = 'Все';
+  switchTab('community');
+  renderCommunity();
+  renderHome();
+  completeTask('post_created');
+  if (!toastTimer || !$('#toast').classList.contains('show')) toast('Пост опубликован');
 }
 
 // ══════════════════════════════
@@ -531,18 +516,17 @@ function timeLeft(ms) {
 
 function renderPrizes() {
   $('#streak-num').textContent = state.streak;
+  $('#streak-label').textContent = `${daysWord(state.streak)} подряд`;
   $('#drops-list').innerHTML = D.drops.map(d => {
     const left = dropLeft(d);
     const ms = dropEndsAt(d) - Date.now();
     const owned = state.myPrizes.some(p => p.dropId === d.id);
-    const locked = d.requiresEpisode && !epState(d.requiresEpisode).done;
-    let label = `Забрать за ${d.cost} очков`;
+    let label = `Забрать за ${pts(d.cost)}`;
     let disabled = false;
     if (owned) { label = 'Уже ваш'; disabled = true; }
     else if (ms <= 0) { label = 'Дроп завершён'; disabled = true; }
     else if (!left) { label = 'Разобрали'; disabled = true; }
-    else if (locked) { label = 'Дослушайте выпуск, чтобы открыть'; }
-    else if (state.points < d.cost) { label = `Нужно ещё ${d.cost - state.points} очков`; disabled = true; }
+    else if (state.points < d.cost) { label = `Нужно ещё ${pts(d.cost - state.points)}`; disabled = true; }
     const rarity = { legendary: 'Легендарный', rare: 'Редкий', common: 'Обычный' }[d.rarity];
     return `<div class="drop-card">
       <div class="drop-top">
@@ -553,7 +537,7 @@ function renderPrizes() {
       <div class="drop-bottom">
         <div class="drop-stats"><span>Осталось <b>${left}</b> из ${d.total}</span><span class="drop-timer" data-drop-timer="${d.id}">${timeLeft(ms)}</span></div>
         <div class="progress-track"><div class="progress-fill" style="width:${left / d.total * 100}%"></div></div>
-        <button class="btn ${locked && !owned ? '' : 'primary'}" data-claim="${d.id}" ${disabled ? 'disabled' : ''}>${esc(label)}</button>
+        <button class="btn primary" data-claim="${d.id}" ${disabled ? 'disabled' : ''}>${esc(label)}</button>
       </div>
     </div>`;
   }).join('');
@@ -562,7 +546,7 @@ function renderPrizes() {
     const done = !!state.tasksDone[t.id];
     return `<div class="task-item${done ? ' done-item' : ''}">
       <div class="task-check${done ? ' done' : ''}"></div>
-      <div class="task-info"><div class="task-name">${esc(t.name)}</div><div class="task-pts">+${t.points} очков</div></div>
+      <div class="task-info"><div class="task-name">${esc(t.name)}</div><div class="task-pts">+${pts(t.points)}</div></div>
       ${done ? '' : `<button class="task-go" data-go="${t.go}">Выполнить →</button>`}
     </div>`;
   }).join('');
@@ -578,16 +562,10 @@ function renderPrizes() {
 
 function claimDrop(id) {
   const d = byId(D.drops, id);
-  if (d.requiresEpisode && !epState(d.requiresEpisode).done) {
-    const ep = byId(D.episodes, d.requiresEpisode);
-    switchTab('podcasts');
-    toast(`Дослушайте «${ep.title}»`);
-    return;
-  }
   if (!user) return requireLogin('Войдите, чтобы забрать приз');
   const left = dropLeft(d);
   if (!left || state.points < d.cost || state.myPrizes.some(p => p.dropId === id)) return;
-  if (!confirm(`Обменять ${d.cost} очков на «${d.name}»?`)) return;
+  if (!confirm(`Обменять ${pts(d.cost)} на «${d.name}»?`)) return;
   // В продакшене списание и резерв приза делает сервер атомарно — иначе лимит можно обойти.
   state.points -= d.cost;
   state.dropsLeft[id] = left - 1;
@@ -718,10 +696,9 @@ function sendMessage(text) {
 
 function aiContext() {
   const catalog = D.products.map(p => `${p.name} — ${p.price} ₽ (${p.category}, продавец ${D.sellers[p.seller].name})`).join('\n');
-  const drops = D.drops.map(d => `${d.name}: ${d.cost} очков, осталось ${dropLeft(d)} из ${d.total}`
-    + (d.requiresEpisode ? `, нужно дослушать выпуск «${byId(D.episodes, d.requiresEpisode).title}»` : '')).join('\n');
-  const eps = D.episodes.map(e => `«${e.title}» (${e.show}, ${Math.round(e.duration / 60)} мин, +${e.points} очков)`).join('\n');
-  return `Комиссия площадки: ${pct(CFG.COMMISSION)}.\nОчки пользователя: ${state.points}.\n\nКаталог:\n${catalog}\n\nПризы:\n${drops}\n\nПодкасты:\n${eps}`;
+  const drops = D.drops.map(d => `${d.name}: ${d.cost} очков, осталось ${dropLeft(d)} из ${d.total}`).join('\n');
+  const tasks = D.tasks.map(t => `${t.name}: +${t.points} очков`).join('\n');
+  return `Комиссия площадки: до ${pct(CFG.COMMISSION)}.\nОчки пользователя: ${state.points}.\n\nКаталог:\n${catalog}\n\nПризы:\n${drops}\n\nЗадания на день:\n${tasks}`;
 }
 
 async function askAI(t) {
@@ -761,7 +738,7 @@ function renderAll() {
   renderHeader();
   renderHome();
   renderShop();
-  renderPodcasts();
+  renderCommunity();
   renderChats();
   renderPrizes();
   renderProfile();
@@ -803,9 +780,9 @@ function renderProfile() {
         </div>
       </div>
       <div class="profile-stats">
-        <div><b>${state.points}</b><span>очков</span></div>
-        <div><b>${state.streak}</b><span>дней подряд</span></div>
-        <div><b>${prizes}</b><span>призов</span></div>
+        <div><b>${state.points}</b><span>${plural(state.points, 'очко', 'очка', 'очков')}</span></div>
+        <div><b>${state.streak}</b><span>${daysWord(state.streak)} подряд</span></div>
+        <div><b>${prizes}</b><span>${plural(prizes, 'приз', 'приза', 'призов')}</span></div>
       </div>
       <form class="auth-form" data-form="profile">
         ${field('name', 'Имя', 'text', `value="${esc(user.name)}" autocomplete="name" maxlength="80"`)}
@@ -872,7 +849,7 @@ function renderProfile() {
 function applyLogin(data, quiet) {
   user = data.user;
   if (data.state && data.state.v === 1) {
-    state = data.state;
+    state = normalizeState(data.state);
     checkStreak();
   } else {
     pushState();
@@ -985,7 +962,7 @@ document.addEventListener('submit', e => {
 // СОБЫТИЯ
 // ══════════════════════════════
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-auth-view],[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-show],[data-play],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg]');
+  const el = e.target.closest('[data-auth-view],[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-topic],[data-post-topic],[data-like],[data-reply],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg]');
   if (!el) return;
   const ds = el.dataset;
 
@@ -1012,7 +989,7 @@ document.addEventListener('click', e => {
   if (ds.follow) {
     const wasFollowing = !!state.following[ds.follow];
     if (wasFollowing) delete state.following[ds.follow]; else state.following[ds.follow] = true;
-    save(); renderHome();
+    save(); renderCommunity();
     if (!wasFollowing) completeTask('follow_case');
     return;
   }
@@ -1022,17 +999,21 @@ document.addEventListener('click', e => {
     return openThread(t.id);
   }
   if (ds.category) { shopCategory = ds.category; return renderShop(); }
-  if (ds.show) { podShow = ds.show; return renderPodcasts(); }
-  if (ds.play) return playEpisode(ds.play);
+  if (ds.topic) { commTopic = ds.topic; return renderCommunity(); }
+  if (ds.postTopic) { postTopic = ds.postTopic; return renderComposer(); }
+  if (ds.like) return toggleLike(ds.like);
+  if (ds.reply) {
+    const p = byId(D.posts, ds.reply);
+    const who = person(p.author);
+    const t = D.sellers[p.author]
+      ? getOrCreateThread({ id: p.author, kind: 'seller', seller: p.author })
+      : getOrCreateThread({ id: 'member-' + p.author, kind: 'user', name: who.name, role: who.role });
+    return openThread(t.id);
+  }
   if (ds.claim) return claimDrop(ds.claim);
   if (ds.thread) return openThread(ds.thread);
   if (ds.suggest) return sendMessage(ds.suggest);
-  if (ds.seg) {
-    $$('#community-tabs .seg').forEach(b => b.classList.toggle('active', b === el));
-    $('#community-cases').hidden = ds.seg !== 'cases';
-    $('#community-requests').hidden = ds.seg !== 'requests';
-    return;
-  }
+  if (ds.seg) { commSeg = ds.seg; return renderCommunity(); }
 
   switch (ds.action) {
     case 'open-ai': return openThread('ai');
@@ -1045,6 +1026,7 @@ document.addEventListener('click', e => {
         .then(() => toast('Код отправлен ещё раз'))
         .catch(err => toast(err.message));
     case 'checkout': return checkout();
+    case 'new-post': return openComposer();
     case 'become-seller':
       openThread('ai');
       $('#thread-input').value = 'Хочу продавать в Пространстве. С чего начать и сколько я буду получать с продажи?';
@@ -1054,7 +1036,7 @@ document.addEventListener('click', e => {
       if (!title || !title.trim()) return;
       const desc = prompt('Пара слов подробнее (необязательно)') || '';
       state.userRequests.unshift({ id: 'u' + Date.now(), tag: 'Запрос', title: title.trim(), desc: desc.trim(), author: 'Вы', when: 'только что', mine: true });
-      save(); renderHome();
+      save(); renderCommunity();
       return toast('Запрос опубликован');
     }
   }
@@ -1062,8 +1044,8 @@ document.addEventListener('click', e => {
 
 $('#cc-price').addEventListener('input', renderCommission);
 $('#shop-search').addEventListener('input', e => { shopQuery = e.target.value; renderShop(); });
-$('#mp-toggle').addEventListener('click', () => player.playing ? pausePlayer() : resumePlayer());
-$('#mp-fwd').addEventListener('click', forward30);
+$('#post-text').addEventListener('input', renderComposer);
+$('#post-form').addEventListener('submit', e => { e.preventDefault(); publishPost(); });
 
 const threadInput = $('#thread-input');
 $('#thread-form').addEventListener('submit', e => {
@@ -1089,7 +1071,7 @@ setInterval(() => {
   });
 }, 30e3);
 
-// Сохраняем позицию плеера при сворачивании приложения
+// Сохраняем прогресс при сворачивании приложения
 document.addEventListener('visibilitychange', () => { if (document.hidden) { save(); pushState(); } });
 
 // ══════════════════════════════
@@ -1100,13 +1082,14 @@ renderAll();
 // Если есть активная сессия — подтягиваем профиль и прогресс из базы
 api('GET', '/api/me').then(r => applyLogin(r, true)).catch(() => { /* гость */ });
 
-// Глубокие ссылки: #shop, #podcasts, #chats, #prizes, #ai, #product=p1
+// Глубокие ссылки: #shop, #community, #chats, #prizes, #ai, #product=p1
 (function handleHash() {
   const h = location.hash.slice(1);
   if (!h) return;
   const [k, v] = h.split('=');
   if (k === 'product' && byId(D.products, v)) openProduct(v);
-  else if (['home', 'shop', 'podcasts', 'chats', 'prizes', 'ai'].includes(k)) switchTab(k);
+  else if (['home', 'shop', 'community', 'chats', 'prizes', 'ai'].includes(k)) switchTab(k);
+  else if (k === 'podcasts') switchTab('community'); // старые ссылки
   else if (k === 'login') { renderProfile(); openOverlay('profile-overlay'); }
 })();
 
@@ -1115,5 +1098,5 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') {
 }
 
 // Доступ для нативной оболочки (например, открыть вкладку из push-уведомления)
-window.App = { switchTab, openProduct, openThread, playEpisode, openProfile: () => { renderProfile(); openOverlay('profile-overlay'); } };
+window.App = { switchTab, openProduct, openThread, openComposer, openProfile: () => { renderProfile(); openOverlay('profile-overlay'); } };
 })();
