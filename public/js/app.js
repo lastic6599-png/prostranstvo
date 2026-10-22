@@ -203,6 +203,16 @@ function closeOverlay(id) {
   suppressPop++;
   history.back();
 }
+// Заменить верхний экран другим без лишней записи в истории (иначе «назад» уведёт со страницы)
+function swapOverlay(fromId, toId) {
+  if (!overlayStack.includes(fromId) || overlayStack.includes(toId)) return openOverlay(toId);
+  hideOverlay(fromId);
+  const el = document.getElementById(toId);
+  overlayStack.push(toId);
+  el.style.zIndex = 300 + overlayStack.length;
+  el.classList.add('open');
+  history.replaceState({ overlay: toId }, '');
+}
 function closeAllOverlays() {
   const n = overlayStack.length;
   while (overlayStack.length) hideOverlay(overlayStack[overlayStack.length - 1]);
@@ -252,8 +262,9 @@ function renderCommission() {
 
 function productCard(p) {
   const s = D.sellers[p.seller];
-  return `<button class="product-card" data-product="${p.id}">
-    <div class="product-img">${p.emoji}<div class="product-seller-tag">${esc(s.name)}</div></div>
+  const out = stockOf(p) === 0;
+  return `<button class="product-card${out ? ' sold-out' : ''}" data-product="${p.id}">
+    <div class="product-img">${p.emoji}<div class="product-seller-tag">${esc(s.name)}</div>${out ? '<div class="product-stock-tag">Нет в наличии</div>' : ''}</div>
     <div class="product-info">
       <div class="product-name">${esc(p.name)}</div>
       <div class="product-maker">${esc(s.role)}</div>
@@ -339,19 +350,79 @@ function openProduct(id) {
         <div class="pd-price">${rub(p.price)}</div>
         ${p.market ? `<div class="product-market-price">${rub(p.market)} в рознице</div>` : ''}
       </div>
+      ${stockLine(p)}
       <div class="pd-desc">${esc(p.desc)}</div>
       <div class="pd-split">Из ${rub(p.price)} мастер получит <b>${rub(p.price - fee)}</b>, площадка — ${rub(fee)} (${pct(CFG.COMMISSION)}).</div>
       <div class="pd-points">+${pts(Math.floor(p.price / CFG.RUB_PER_POINT))} за покупку</div>
       <div class="btn-row">
         <button class="btn" data-chat-seller="${p.seller}" data-chat-product="${p.id}">Написать</button>
-        <button class="btn primary" data-add-cart="${p.id}">В корзину</button>
+        <button class="btn primary" data-add-cart="${p.id}" ${stockOf(p) === 0 ? 'disabled' : ''}>${stockOf(p) === 0 ? 'Нет в наличии' : 'В корзину'}</button>
       </div>
     </div>`;
   $('#product-body').scrollTop = 0;
   openOverlay('product-overlay');
 }
 
+// Остаток товара. В демо-каталоге без сервера остатков нет — считаем, что товара сколько угодно.
+function stockOf(p) { return p && p.stock != null ? p.stock : Infinity; }
+
+function stockLine(p) {
+  const n = stockOf(p);
+  if (n === 0) return '<div class="pd-stock out">Нет в наличии</div>';
+  if (n <= 5) return `<div class="pd-stock">Осталось ${n} шт.</div>`;
+  return '';
+}
+
+// Каталог с сервера: актуальные цены и остатки. Без связи остаётся демо-каталог из data.js.
+const shopInfo = { live: false, giftWrapPrice: 300 };
+async function loadCatalog() {
+  try {
+    const r = await api('GET', '/api/catalog');
+    if (!Array.isArray(r.products) || !r.products.length) return false;
+    D.products = r.products;
+    Object.assign(D.sellers, r.sellers);
+    shopInfo.live = true;
+    shopInfo.giftWrapPrice = r.giftWrapPrice;
+    if (fitCartToStock()) toast('Корзина обновлена: часть товаров закончилась');
+    renderHome();
+    renderShop();
+    if (overlayStack.includes('cart-overlay')) renderCart();
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Убирает из корзины то, чего нет в каталоге, и уменьшает количество до остатка
+function fitCartToStock() {
+  let changed = false;
+  for (const [id, q] of Object.entries(state.cart)) {
+    const p = byId(D.products, id);
+    const max = p ? stockOf(p) : 0;
+    if (q > max) {
+      changed = true;
+      if (max > 0) state.cart[id] = max; else delete state.cart[id];
+    }
+  }
+  if (changed) { save(); renderHeader(); }
+  return changed;
+}
+
+function changeQty(id, d) {
+  const p = byId(D.products, id);
+  const next = Math.max(0, (state.cart[id] || 0) + d);
+  if (d > 0 && next > stockOf(p)) return toast(`В наличии только ${stockOf(p)} шт.`);
+  if (next) state.cart[id] = next; else delete state.cart[id];
+  save();
+  renderHeader();
+  renderCart();
+}
+
 function addToCart(id) {
+  const p = byId(D.products, id);
+  if ((state.cart[id] || 0) + 1 > stockOf(p)) {
+    return toast(stockOf(p) === 0 ? 'Товар закончился' : `В наличии только ${stockOf(p)} шт.`);
+  }
   state.cart[id] = (state.cart[id] || 0) + 1;
   save();
   renderHeader();
@@ -361,8 +432,15 @@ function addToCart(id) {
   if (overlayStack.includes('cart-overlay')) renderCart();
 }
 
+function cartItems() {
+  return Object.entries(state.cart).filter(([id, q]) => q > 0 && byId(D.products, id));
+}
+function cartTotal() {
+  return cartItems().reduce((a, [id, q]) => a + byId(D.products, id).price * q, 0);
+}
+
 function renderCart() {
-  const items = Object.entries(state.cart).filter(([, q]) => q > 0);
+  const items = cartItems();
   const body = $('#cart-body');
   body.classList.add('padded');
   if (!items.length) {
@@ -385,21 +463,230 @@ function renderCart() {
     <div class="cart-total">
       <div class="cart-line"><span>Мастера получат</span><span>${rub(toSellers)}</span></div>
       <div class="cart-line"><span>Комиссия площадки</span><span>${rub(total - toSellers)}</span></div>
-      <div class="cart-line"><span>Очки за заказ</span><span>+${Math.floor(total / CFG.RUB_PER_POINT)}</span></div>
-      <div class="cart-line total"><span>Итого</span><span>${rub(total)}</span></div>
+      <div class="cart-line"><span>Очки после оплаты</span><span>+${Math.floor(total / CFG.RUB_PER_POINT)}</span></div>
+      <div class="cart-line total"><span>Товары</span><span>${rub(total)}</span></div>
     </div>
     <button class="btn gold" style="width:100%" data-action="checkout">Оформить заказ</button>`;
 }
 
-function checkout() {
-  if (!user) return requireLogin('Войдите, чтобы оформить заказ');
-  const total = Object.entries(state.cart).reduce((a, [id, q]) => a + byId(D.products, id).price * q, 0);
-  // Здесь будет создание заказа на сервере и оплата (ЮKassa / CloudPayments / Apple Pay).
-  state.cart = {};
-  save();
-  renderCart();
-  addPoints(Math.floor(total / CFG.RUB_PER_POINT), 'заказ оформлен');
-  Native.event('order_created', { total });
+// ── Оформление заказа ──
+// Войти не обязательно: заказ создаётся на сервере, а аккаунт — по почте из заказа.
+let checkoutBusy = false;
+let lastOrder = null;
+
+async function checkout() {
+  if (!cartItems().length) return;
+  if (!shopInfo.live && !(await loadCatalog())) return toast('Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.');
+  if (!cartItems().length) return renderCart();
+  renderCheckoutForm();
+  openOverlay('checkout-overlay');
+}
+
+function textArea(name, label, attrs) {
+  return `<label class="field"><span>${label}</span><textarea name="${name}" rows="2" ${attrs || ''}></textarea></label>`;
+}
+
+function renderCheckoutForm() {
+  $('#checkout-title').textContent = 'Оформление';
+  const u = user || {};
+  $('#checkout-body').innerHTML = `
+    <form class="auth-form checkout-form" data-form="checkout" novalidate>
+      <div class="co-section">Покупатель</div>
+      ${field('name', 'Имя и фамилия', 'text', `value="${esc(u.name || '')}" autocomplete="name" maxlength="80" required`)}
+      ${field('phone', 'Телефон', 'tel', `value="${esc(u.phone || '')}" autocomplete="tel" maxlength="30" placeholder="+7" required`)}
+      ${user
+        ? `<div class="co-note">Чек и статус заказа придут на <b>${esc(user.email)}</b></div>`
+        : field('email', 'Email — для чека и статуса заказа', 'email', 'autocomplete="email" required')}
+
+      <div class="co-section">Доставка</div>
+      <div class="co-options">
+        <label class="co-option"><input type="radio" name="method" value="cdek_pvz" checked>
+          <span><b>Пункт выдачи СДЭК</b><small>Стоимость и срок рассчитаем по адресу</small></span></label>
+        <label class="co-option"><input type="radio" name="method" value="courier">
+          <span><b>Курьер до двери</b><small>Привезём в удобный интервал</small></span></label>
+      </div>
+      <label class="field"><span id="co-address-label">Город и адрес пункта выдачи</span>
+        <input name="address" type="text" value="${esc(u.city ? u.city + ', ' : '')}" autocomplete="street-address" maxlength="300" required></label>
+
+      <label class="check"><input type="checkbox" name="isGift"> Это подарок — доставить другому человеку</label>
+      <div class="co-gift" id="co-gift" hidden>
+        ${field('recipientName', 'Имя получателя', 'text', 'maxlength="80"')}
+        ${field('recipientPhone', 'Телефон получателя', 'tel', 'maxlength="30" placeholder="+7"')}
+        ${textArea('message', 'Открытка (необязательно)', 'maxlength="300" placeholder="Пара тёплых слов — напишем от руки"')}
+        <label class="check"><input type="checkbox" name="wrap" checked> Подарочная упаковка · ${rub(shopInfo.giftWrapPrice)}</label>
+      </div>
+
+      ${textArea('comment', 'Комментарий к заказу (необязательно)', 'maxlength="500"')}
+
+      <div class="cart-total" id="co-summary"></div>
+
+      <label class="check co-agree"><input type="checkbox" name="agree"> <span>Согласен с условиями покупки и обработкой персональных данных</span></label>
+      <button class="btn gold" type="submit">Оформить заказ</button>
+      <div class="auth-note">Онлайн-оплата подключается. После оформления мы свяжемся с вами, чтобы подтвердить доставку и оплату. До оплаты заказ можно отменить.</div>
+      <div class="form-error" id="checkout-error"></div>
+    </form>`;
+  renderCheckoutSummary();
+  $('#checkout-body').scrollTop = 0;
+}
+
+function renderCheckoutSummary() {
+  const form = $('#checkout-body form[data-form=checkout]');
+  if (!form) return;
+  const isGift = form.isGift.checked;
+  const wrap = isGift && form.wrap.checked ? shopInfo.giftWrapPrice : 0;
+  const items = cartItems();
+  const goods = cartTotal();
+  const count = items.reduce((a, [, q]) => a + q, 0);
+  $('#co-gift').hidden = !isGift;
+  $('#co-address-label').textContent = form.method.value === 'courier'
+    ? 'Адрес: город, улица, дом, квартира' : 'Город и адрес пункта выдачи';
+  $('#co-summary').innerHTML = `
+    <div class="cart-line"><span>${count} ${plural(count, 'товар', 'товара', 'товаров')}</span><span>${rub(goods)}</span></div>
+    ${wrap ? `<div class="cart-line"><span>Подарочная упаковка</span><span>${rub(wrap)}</span></div>` : ''}
+    <div class="cart-line"><span>Доставка</span><span>по тарифу СДЭК</span></div>
+    <div class="cart-line"><span>Очки после оплаты</span><span>+${Math.floor(goods / CFG.RUB_PER_POINT)}</span></div>
+    <div class="cart-line total"><span>Итого без доставки</span><span>${rub(goods + wrap)}</span></div>`;
+}
+
+async function submitCheckout(form) {
+  if (checkoutBusy) return;
+  const f = Object.fromEntries(new FormData(form));
+  const errBox = $('#checkout-error');
+  errBox.textContent = '';
+  const body = {
+    items: cartItems().map(([productId, qty]) => ({ productId, qty })),
+    contact: { name: f.name, phone: f.phone, email: user ? user.email : f.email },
+    delivery: { method: f.method, address: f.address },
+    gift: { isGift: !!f.isGift, wrap: !!f.wrap, recipientName: f.recipientName, recipientPhone: f.recipientPhone, message: f.message },
+    comment: f.comment,
+    agree: !!f.agree,
+  };
+  checkoutBusy = true;
+  form.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    const r = await api('POST', '/api/orders', body);
+    lastOrder = r;
+    state.cart = {};
+    save();
+    renderHeader();
+    renderCart();
+    Native.haptic('success');
+    Native.event('order_created', { number: r.order.number, total: r.order.total });
+    renderOrderDone();
+    if (user) refreshOrders();
+    loadCatalog();
+  } catch (e) {
+    errBox.textContent = e.message;
+    // Кто-то успел купить раньше: обновляем остатки и корзину
+    if (e.status === 409) { await loadCatalog(); renderCheckoutSummary(); }
+  } finally {
+    checkoutBusy = false;
+    form.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  }
+}
+
+function renderOrderDone() {
+  const { order, account, email } = lastOrder;
+  $('#checkout-title').textContent = 'Заказ оформлен';
+  const accountBlock = {
+    verify: `
+      <div class="co-account">
+        <div class="auth-lead">Мы создали аккаунт по почте <b>${esc(email)}</b>, чтобы заказ хранился в профиле. Введите код из письма:</div>
+        <form class="auth-form" data-form="order-verify">
+          ${field('code', 'Код из письма', 'text', 'inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" required class="code-input"')}
+          <button class="btn primary" type="submit">Подтвердить почту</button>
+          <button class="link-btn" type="button" data-action="resend-order-code">Отправить код ещё раз</button>
+        </form>
+        <div class="form-error" id="checkout-error"></div>
+      </div>`,
+    login: `
+      <div class="co-account">
+        <div class="auth-lead">Почта <b>${esc(email)}</b> уже зарегистрирована. Войдите — и заказ появится в профиле.</div>
+        <button class="btn primary" style="width:100%" data-action="order-login">Войти</button>
+      </div>`,
+    ok: `<button class="btn primary" style="width:100%" data-action="my-orders">Мои заказы</button>`,
+    verified: `
+      <div class="co-account">
+        <div class="auth-lead">Почта подтверждена, заказ — в профиле. Пароль можно задать на экране входа через «Забыли пароль?».</div>
+        <button class="btn primary" style="width:100%" data-action="my-orders">Мои заказы</button>
+      </div>`,
+  }[account] || '';
+  $('#checkout-body').innerHTML = `
+    <div class="order-done">
+      <div class="order-done-mark">✓</div>
+      <div class="order-done-title">Заказ ${esc(order.number)}</div>
+      <div class="order-done-sub">${esc(order.statusLabel)} · ${rub(order.total)} без доставки</div>
+    </div>
+    <div class="order-lines">
+      ${order.items.map(i => `<div class="cart-line"><span>${esc(i.name)} × ${i.qty}</span><span>${rub(i.unitPrice * i.qty)}</span></div>`).join('')}
+      ${order.giftWrapCost ? `<div class="cart-line"><span>Подарочная упаковка</span><span>${rub(order.giftWrapCost)}</span></div>` : ''}
+      <div class="cart-line"><span>${esc(order.deliveryLabel)}</span><span>по тарифу</span></div>
+    </div>
+    <div class="auth-note co-next">Мы свяжемся с вами, чтобы подтвердить доставку и оплату. Очки начислятся после оплаты.</div>
+    ${accountBlock}
+    <button class="btn" style="width:100%;margin-top:.6rem" data-go="shop">Продолжить покупки</button>`;
+  $('#checkout-body').scrollTop = 0;
+}
+
+async function submitOrderVerify(form) {
+  if (checkoutBusy) return;
+  const f = Object.fromEntries(new FormData(form));
+  checkoutBusy = true;
+  form.querySelectorAll('button').forEach(b => { b.disabled = true; });
+  try {
+    const r = await api('POST', '/api/auth/verify', { email: lastOrder.email, code: f.code });
+    applyLogin(r);
+    lastOrder.account = 'verified';
+    renderOrderDone();
+  } catch (e) {
+    $('#checkout-error').textContent = e.message;
+    form.querySelectorAll('button').forEach(b => { b.disabled = false; });
+  } finally {
+    checkoutBusy = false;
+  }
+}
+
+// ── Мои заказы (в профиле) ──
+let myOrders = null; // null — ещё не загружали
+
+async function refreshOrders() {
+  if (!user) { myOrders = null; return; }
+  try {
+    myOrders = (await api('GET', '/api/orders')).orders;
+  } catch (e) {
+    if (myOrders == null) myOrders = [];
+  }
+  const box = $('#my-orders');
+  if (box) box.innerHTML = ordersHtml();
+}
+
+function ordersHtml() {
+  if (myOrders == null) return '<div class="empty">Загружаем…</div>';
+  if (!myOrders.length) return '<div class="empty">Заказов пока нет</div>';
+  return myOrders.map(o => {
+    const count = o.items.reduce((a, i) => a + i.qty, 0);
+    const date = new Date(o.createdAt).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long' });
+    return `<div class="order-card">
+      <div class="order-head"><b>${esc(o.number)}</b><span class="order-status st-${esc(o.status)}">${esc(o.statusLabel)}</span></div>
+      <div class="order-meta">${date} · ${count} ${plural(count, 'товар', 'товара', 'товаров')} · ${rub(o.total)}</div>
+      <div class="order-items">${o.items.map(i => `${esc(i.name)} × ${i.qty}`).join(', ')}</div>
+      <div class="order-meta">${esc(o.deliveryLabel)} · ${esc(o.deliveryAddress)}${o.isGift ? ' · 🎁 подарок' : ''}</div>
+      ${o.status === 'awaiting_payment' ? `<button class="link-btn danger" data-cancel-order="${esc(o.id)}">Отменить заказ</button>` : ''}
+    </div>`;
+  }).join('');
+}
+
+async function cancelOrder(id) {
+  const o = (myOrders || []).find(x => x.id === id);
+  if (!o || !confirm(`Отменить заказ ${o.number}?`)) return;
+  try {
+    await api('POST', '/api/orders/cancel', { id });
+    toast('Заказ отменён');
+  } catch (e) {
+    toast(e.message);
+  }
+  await refreshOrders();
+  loadCatalog();
 }
 
 // ══════════════════════════════
@@ -791,6 +1078,8 @@ function renderProfile() {
         <label class="check"><input type="checkbox" name="isSeller" ${user.isSeller ? 'checked' : ''}> Я продаю свои товары</label>
         <button class="btn primary" type="submit">Сохранить</button>
       </form>
+      <div class="co-section">Мои заказы</div>
+      <div id="my-orders">${ordersHtml()}</div>
       <div class="profile-actions">
         <button class="btn" data-action="logout">Выйти</button>
         <button class="link-btn danger" data-action="delete-account">Удалить аккаунт</button>
@@ -856,6 +1145,12 @@ function applyLogin(data, quiet) {
   }
   save();
   renderAll();
+  refreshOrders();
+  // Вошли после заказа на уже зарегистрированную почту — заказ теперь в профиле
+  if (lastOrder && lastOrder.account === 'login' && overlayStack.includes('checkout-overlay')) {
+    lastOrder.account = 'ok';
+    renderOrderDone();
+  }
   if (!quiet) toast(`Добро пожаловать${user.name ? ', ' + user.name : ''}!`);
 }
 
@@ -923,6 +1218,7 @@ async function logout() {
   pushState();
   try { await api('POST', '/api/auth/logout'); } catch (e) { /* всё равно выходим локально */ }
   user = null;
+  myOrders = null;
   // На общем устройстве данные прошлого пользователя не должны оставаться
   state = initialState();
   checkStreak();
@@ -942,6 +1238,7 @@ async function deleteAccount() {
     return toast(e.message);
   }
   user = null;
+  myOrders = null;
   state = initialState();
   checkStreak();
   save();
@@ -955,14 +1252,25 @@ document.addEventListener('submit', e => {
   const form = e.target.closest('form[data-form]');
   if (!form) return;
   e.preventDefault();
+  if (form.dataset.form === 'checkout') return submitCheckout(form);
+  if (form.dataset.form === 'order-verify') return submitOrderVerify(form);
   submitAuthForm(form);
+});
+
+// Форма заказа: подарок, способ доставки и упаковка меняют подсказки и сумму
+document.addEventListener('change', e => {
+  if (e.target.closest('form[data-form=checkout]')) renderCheckoutSummary();
+});
+document.addEventListener('input', e => {
+  const box = e.target.closest('form[data-form=checkout]') && $('#checkout-error');
+  if (box) box.textContent = '';
 });
 
 // ══════════════════════════════
 // СОБЫТИЯ
 // ══════════════════════════════
 document.addEventListener('click', e => {
-  const el = e.target.closest('[data-auth-view],[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-topic],[data-post-topic],[data-like],[data-reply],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg]');
+  const el = e.target.closest('[data-auth-view],[data-go],[data-tab],[data-product],[data-add-cart],[data-chat-seller],[data-qty],[data-follow],[data-respond],[data-category],[data-topic],[data-post-topic],[data-like],[data-reply],[data-claim],[data-thread],[data-suggest],[data-close],[data-action],[data-seg],[data-cancel-order]');
   if (!el) return;
   const ds = el.dataset;
 
@@ -981,11 +1289,8 @@ document.addEventListener('click', e => {
     return openThread(ds.chatSeller, ds.chatProduct);
   }
   if (ds.product) return openProduct(ds.product);
-  if (ds.qty) {
-    state.cart[ds.qty] = Math.max(0, (state.cart[ds.qty] || 0) + +ds.d);
-    if (!state.cart[ds.qty]) delete state.cart[ds.qty];
-    save(); renderHeader(); return renderCart();
-  }
+  if (ds.qty) return changeQty(ds.qty, +ds.d);
+  if (ds.cancelOrder) return cancelOrder(ds.cancelOrder);
   if (ds.follow) {
     const wasFollowing = !!state.following[ds.follow];
     if (wasFollowing) delete state.following[ds.follow]; else state.following[ds.follow] = true;
@@ -1018,7 +1323,16 @@ document.addEventListener('click', e => {
   switch (ds.action) {
     case 'open-ai': return openThread('ai');
     case 'open-cart': renderCart(); return openOverlay('cart-overlay');
-    case 'open-profile': renderProfile(); return openOverlay('profile-overlay');
+    case 'open-profile': renderProfile(); refreshOrders(); return openOverlay('profile-overlay');
+    case 'my-orders':
+      renderProfile(); refreshOrders(); return swapOverlay('checkout-overlay', 'profile-overlay');
+    case 'order-login':
+      authEmail = lastOrder.email; authView = 'login';
+      renderProfile(); return openOverlay('profile-overlay');
+    case 'resend-order-code':
+      return api('POST', '/api/auth/resend', { email: lastOrder.email })
+        .then(() => toast('Код отправлен ещё раз'))
+        .catch(err => toast(err.message));
     case 'logout': return logout();
     case 'delete-account': return deleteAccount();
     case 'resend-code':
@@ -1078,6 +1392,9 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) { sav
 // СТАРТ
 // ══════════════════════════════
 renderAll();
+
+// Актуальный каталог с остатками
+loadCatalog();
 
 // Если есть активная сессия — подтягиваем профиль и прогресс из базы
 api('GET', '/api/me').then(r => applyLogin(r, true)).catch(() => { /* гость */ });

@@ -126,6 +126,26 @@ function createAuth(db) {
     await db.run('DELETE FROM email_codes WHERE email = ? AND purpose = ?', [email, purpose]);
   }
 
+  // Заказ без регистрации: создаём неподтверждённый аккаунт по почте из заказа и отправляем код.
+  // Возвращает 'verify' — нужно подтвердить почту кодом, 'login' — аккаунт уже есть, нужно войти.
+  async function prepareGuestAccount(email, name, phone) {
+    const u = await db.get('SELECT id, email_verified FROM users WHERE email = ?', [email]);
+    if (u && u.email_verified) return 'login';
+    if (!u) {
+      const now = Date.now();
+      // Пароль случайный: задать свой можно через «Регистрация» или «Забыли пароль?» с той же почтой
+      await db.run(`INSERT INTO users (id, email, password_hash, name, phone, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        [crypto.randomUUID(), email, hashPassword(crypto.randomBytes(24).toString('base64')), clean(name, 80), clean(phone, 30), now, now]);
+    }
+    try {
+      await issueCode(email, 'verify');
+    } catch (e) {
+      // Заказ уже создан: если письмо не ушло, код можно запросить ещё раз
+      if (e.status !== 429) console.error('[guest]', e.message);
+    }
+    return 'verify';
+  }
+
   async function userState(userId) {
     const row = await db.get('SELECT data FROM user_state WHERE user_id = ?', [userId]);
     return row ? JSON.parse(row.data) : null;
@@ -264,7 +284,7 @@ function createAuth(db) {
     await db.run('DELETE FROM email_codes WHERE expires_at < ?', [now]);
   }
 
-  return { routes, currentUser, cleanup };
+  return { routes, currentUser, cleanup, prepareGuestAccount };
 }
 
-module.exports = { createAuth, HttpError };
+module.exports = { createAuth, HttpError, normEmail, validateEmail, clean };
