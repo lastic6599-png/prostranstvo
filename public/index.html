@@ -9,11 +9,11 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Пространство">
 <meta name="format-detection" content="telephone=no">
-<title>Пространство — маркетплейс мастеров с комиссией 5%</title>
-<meta name="description" content="Покупайте у мастеров и небольших брендов напрямую. Комиссия для продавцов 5%, чаты с продавцами, ИИ-ассистент и подкасты, за которые дают призы.">
+<title>Пространство — маркетплейс мастеров с комиссией до 10%</title>
+<meta name="description" content="Покупайте у мастеров и небольших брендов напрямую. Комиссия для продавцов до 10%, чаты с продавцами, ИИ-ассистент и сообщество, где делятся ростом и получают призы.">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Пространство — маркетплейс мастеров">
-<meta property="og:description" content="Комиссия 5%, чаты с продавцами, ИИ-ассистент и подкасты с лимитированными призами.">
+<meta property="og:description" content="Комиссия до 10%, чаты с продавцами, ИИ-ассистент и сообщество с лимитированными призами.">
 <meta property="og:image" content="icons/icon-512.png">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -48,10 +48,10 @@
   <!-- ① ГЛАВНАЯ -->
   <section class="page active" id="page-home">
     <div class="hero">
-      <div class="hero-eyebrow">Маркетплейс · Сообщество · Подкасты</div>
+      <div class="hero-eyebrow">Маркетплейс · Сообщество · Призы</div>
       <h1>Покупай.<br><em>Продавай.</em><br>Делись.</h1>
       <div class="hero-divider"></div>
-      <p>Маркетплейс с честной комиссией <strong id="hero-commission"></strong>, живыми чатами с продавцами, ИИ-ассистентом и подкастами, за которые дают призы.</p>
+      <p>Маркетплейс с честной комиссией <strong id="hero-commission"></strong>, живыми чатами с продавцами, ИИ-ассистентом и сообществом, где делятся ростом и получают призы.</p>
       <button class="hero-btn" data-go="shop">В магазин</button>
     </div>
 
@@ -72,18 +72,10 @@
       </div>
       <div class="counter-grid">
         <div class="counter-item"><div class="counter-num">128</div><div class="counter-label">новых<br>товаров</div></div>
-        <div class="counter-item"><div class="counter-num">2</div><div class="counter-label">новых<br>выпуска</div></div>
+        <div class="counter-item"><div class="counter-num">34</div><div class="counter-label">новых<br>поста</div></div>
         <div class="counter-item"><div class="counter-num">12</div><div class="counter-label">новых<br>запросов</div></div>
         <div class="counter-item"><div class="counter-num" id="home-drops-left">—</div><div class="counter-label">призов<br>осталось</div></div>
       </div>
-    </div>
-
-    <div class="home-section">
-      <div class="section-header">
-        <div class="section-title">Новый выпуск</div>
-        <button class="section-more" data-go="podcasts">Все →</button>
-      </div>
-      <div id="home-episode"></div>
     </div>
 
     <div class="home-section tight">
@@ -95,15 +87,11 @@
     </div>
 
     <div class="home-section">
-      <div class="segmented" id="community-tabs">
-        <button class="seg active" data-seg="cases">Кейсы</button>
-        <button class="seg" data-seg="requests">Запросы</button>
+      <div class="section-header">
+        <div class="section-title">Из сообщества</div>
+        <button class="section-more" data-go="community">Все →</button>
       </div>
-      <div id="community-cases"></div>
-      <div id="community-requests" hidden>
-        <button class="add-request-btn" data-action="add-request">Разместить запрос</button>
-        <div id="requests-list"></div>
-      </div>
+      <div class="post-list flush" id="home-posts"></div>
     </div>
   </section>
 
@@ -122,22 +110,40 @@
       <div class="shop-banner-icon">✦</div>
       <div class="shop-banner-text">
         <strong>Хочешь продавать здесь?</strong>
-        <span>Комиссия от <b id="banner-commission"></b>, выплаты без задержек</span>
+        <span>Комиссия до <b id="banner-commission"></b>, выплаты без задержек</span>
       </div>
     </div>
     <div class="shop-grid" id="shop-grid"></div>
     <div class="empty" id="shop-empty" hidden>Ничего не нашлось</div>
   </section>
 
-  <!-- ③ ПОДКАСТЫ -->
-  <section class="page" id="page-podcasts">
-    <div class="pod-header">
-      <div class="pod-eyebrow">Слушай и получай очки</div>
-      <div class="pod-title">Подкасты</div>
-      <div class="pod-subtitle">Дослушал выпуск — получил очки. Очки обмениваются на лимитированные призы.</div>
+  <!-- ③ СООБЩЕСТВО -->
+  <section class="page" id="page-community">
+    <div class="dark-header">
+      <div class="dark-eyebrow">Делись ростом — получай очки</div>
+      <div class="dark-title">Сообщество</div>
+      <div class="dark-subtitle">Истории, цели и вопросы участников. Расскажи о своём прогрессе: это лучшая реклама твоих товаров.</div>
+      <button class="hero-btn compact" data-action="new-post">Написать пост</button>
     </div>
-    <div class="feed-filter" id="pod-filter"></div>
-    <div class="episode-list" id="episode-list"></div>
+    <div class="comm-tabs">
+      <div class="segmented" id="community-tabs">
+        <button class="seg active" data-seg="feed">Лента</button>
+        <button class="seg" data-seg="cases">Кейсы</button>
+        <button class="seg" data-seg="requests">Запросы</button>
+      </div>
+    </div>
+    <div id="comm-feed">
+      <div class="feed-filter" id="topic-filter"></div>
+      <div class="post-list" id="post-list"></div>
+      <div class="empty" id="post-empty" hidden>В этой теме пока нет постов</div>
+    </div>
+    <div class="comm-pad" id="comm-cases" hidden>
+      <div id="community-cases"></div>
+    </div>
+    <div class="comm-pad" id="comm-requests" hidden>
+      <button class="add-request-btn" data-action="add-request">Разместить запрос</button>
+      <div id="requests-list"></div>
+    </div>
   </section>
 
   <!-- ④ ЧАТЫ -->
@@ -153,14 +159,14 @@
   <section class="page" id="page-prizes">
     <div class="ach-header">
       <div class="ach-title">Призы</div>
-      <div class="ach-subtitle">Слушай подкасты, покупай, участвуй — обменивай очки на лимитки</div>
-      <div class="ach-points"><span id="ach-points">0</span> очков</div>
+      <div class="ach-subtitle">Покупай, делись ростом в сообществе, участвуй — обменивай очки на лимитки</div>
+      <div class="ach-points"><span id="ach-points">0</span> <i id="ach-points-label">очков</i></div>
     </div>
 
     <div class="streak-bar">
       <div class="streak-num" id="streak-num">0</div>
       <div class="streak-text">
-        <strong>дней подряд</strong>
+        <strong id="streak-label">дней подряд</strong>
         <span>Заходи каждый день — бонус за серию растёт</span>
       </div>
     </div>
@@ -230,20 +236,20 @@
   </form>
 </div>
 
-<!-- МИНИ-ПЛЕЕР -->
-<div class="mini-player" id="mini-player" hidden>
-  <div class="mp-progress"><div class="mp-progress-fill" id="mp-fill"></div></div>
-  <div class="mp-row">
-    <div class="mp-cover" id="mp-cover"></div>
-    <div class="mp-info">
-      <div class="mp-title" id="mp-title"></div>
-      <div class="mp-meta" id="mp-meta"></div>
-    </div>
-    <button class="mp-btn" id="mp-toggle" aria-label="Play/Pause"></button>
-    <button class="mp-btn" id="mp-fwd" aria-label="Вперёд 30 секунд">
-      <svg viewBox="0 0 24 24"><path d="M5 12a7 7 0 1 0 2-5"/><path d="M5 3v4h4"/></svg>
-    </button>
+<!-- НОВЫЙ ПОСТ -->
+<div class="overlay" id="post-overlay" data-overlay>
+  <div class="overlay-topbar">
+    <button class="overlay-back" data-close>←</button>
+    <div class="overlay-title">Новый пост</div>
   </div>
+  <form class="overlay-body padded post-form" id="post-form">
+    <div class="post-form-label">Тема</div>
+    <div class="topic-pick" id="post-topics"></div>
+    <label class="post-form-label" for="post-text">Что нового</label>
+    <textarea class="post-input" id="post-text" rows="7" placeholder="Что получилось, что не сработало, какая цель на месяц?"></textarea>
+    <div class="post-form-foot"><span id="post-hint"></span><span id="post-count"></span></div>
+    <button class="btn primary" type="submit" id="post-submit">Опубликовать</button>
+  </form>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -256,8 +262,8 @@
   <button class="tab-btn" data-tab="shop">
     <svg viewBox="0 0 24 24"><path d="M4 8h16l-1.5 12h-13z"/><path d="M8 8V6a4 4 0 018 0v2"/></svg>Магазин
   </button>
-  <button class="tab-btn" data-tab="podcasts">
-    <svg viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0014 0M12 18v4"/></svg>Подкасты
+  <button class="tab-btn" data-tab="community">
+    <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M16 4.6a3.5 3.5 0 010 6.8M18 14.3c2.1.7 3.5 2.8 3.5 5.7"/></svg>Сообщество
   </button>
   <button class="tab-btn" data-tab="chats">
     <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>Чаты
