@@ -1,4 +1,5 @@
-// Сервер Пространства: отдаёт public/, аккаунты пользователей (/api/auth, /api/me) и прокси к ИИ.
+// Сервер Пространства: отдаёт public/, аккаунты пользователей (/api/auth, /api/me),
+// каталог и заказы (/api/catalog, /api/orders) и прокси к ИИ.
 // Ключи API хранятся только здесь (в переменных окружения), а не в браузере.
 //
 // Запуск:  npm start  (настройки — в .env, см. .env.example)
@@ -15,9 +16,13 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 const { pickProvider } = require('./ai');
 const { createDb } = require('./db');
 const { createAuth, HttpError } = require('./auth');
+const { createShop } = require('./shop');
+const { seedCatalog } = require('./seed');
 
 const db = createDb();
 const auth = createAuth(db);
+const shop = createShop(db, auth);
+const routes = Object.assign({}, auth.routes, shop.routes);
 // За nginx / балансировщиком реальный IP берём из X-Forwarded-For
 const TRUST_PROXY = process.env.TRUST_PROXY === '1';
 // Попыток входа / регистрации / ввода кода в минуту с одного IP
@@ -133,7 +138,7 @@ function serveStatic(req, res) {
 
 async function handleApi(req, res, pathname) {
   const key = `${req.method} ${pathname}`;
-  const handler = key === 'POST /api/ai' ? handleAI : auth.routes[key];
+  const handler = key === 'POST /api/ai' ? handleAI : routes[key];
   if (!handler) return sendJson(res, 404, { error: 'Не найдено.' });
 
   let body = {};
@@ -147,8 +152,17 @@ async function handleApi(req, res, pathname) {
   if (pathname.startsWith('/api/auth/') && key !== 'POST /api/auth/logout' && rateLimited('auth:' + clientIp(req), AUTH_RATE_LIMIT)) {
     return sendJson(res, 429, { error: 'Слишком много попыток. Подождите минуту.' });
   }
+  // Заказ без входа создаёт аккаунт и отправляет письмо — ограничиваем, чтобы не рассылали спам
+  if (key === 'POST /api/orders' && rateLimited('order:' + clientIp(req), 5)) {
+    return sendJson(res, 429, { error: 'Слишком много заказов подряд. Подождите минуту.' });
+  }
   try {
-    sendJson(res, 200, await handler(req, res, body));
+    const result = await handler(req, res, body);
+    // Почта подтверждена (код, вход, сброс пароля) — привязываем к аккаунту заказы, оформленные без входа
+    if (result && result.user && result.user.emailVerified && (key.startsWith('POST /api/auth/') || key === 'GET /api/me')) {
+      await shop.claimOrders(result.user.id, result.user.email).catch(e => console.error('claimOrders', e.message));
+    }
+    sendJson(res, 200, result);
   } catch (e) {
     if (e instanceof HttpError) return sendJson(res, e.status, Object.assign({ error: e.message }, e.extra));
     console.error(key, e);
@@ -169,7 +183,8 @@ const server = http.createServer((req, res) => {
   res.writeHead(405); res.end();
 });
 
-db.migrate().then(() => {
+db.migrate().then(async () => {
+  if (await seedCatalog(db)) console.log('Каталог: записаны демо-товары');
   setInterval(() => auth.cleanup().catch(e => console.error('cleanup', e.message)), 3600e3).unref();
   server.listen(PORT, () => {
     console.log(`Пространство: http://localhost:${PORT}`);

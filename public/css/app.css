@@ -682,3 +682,69 @@ button { font-family: inherit; }
 .profile-stats b { display: block; font-family: 'Cormorant Garamond', serif; font-size: 1.5rem; font-weight: 400; color: var(--gold); }
 .profile-stats span { font-size: .58rem; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .profile-actions { display: flex; flex-direction: column; gap: .6rem; margin: 1.6rem 0 2rem; }
+
+/* ── ОСТАТКИ ── */
+.product-card.sold-out .product-img { opacity: .55; }
+.product-stock-tag {
+  position: absolute; top: 6px; right: 6px;
+  padding: .18rem .45rem; background: var(--cream); border-radius: 2px;
+  font-size: .52rem; letter-spacing: .07em; text-transform: uppercase; color: var(--ink);
+}
+.pd-stock { font-size: .7rem; letter-spacing: .06em; color: var(--gold); margin: -.6rem 0 1rem; }
+.pd-stock.out { color: var(--danger); }
+
+/* ── ОФОРМЛЕНИЕ ЗАКАЗА ── */
+.co-section {
+  font-size: .6rem; letter-spacing: .16em; text-transform: uppercase; color: var(--gold);
+  margin: 1.6rem 0 .1rem; padding-bottom: .5rem; border-bottom: 1px solid var(--gold-dim);
+}
+.checkout-form .co-section:first-child { margin-top: .6rem; }
+.co-note { font-size: .74rem; color: var(--muted); line-height: 1.5; }
+.co-note b { color: var(--ink); font-weight: 500; overflow-wrap: anywhere; }
+.co-options { display: flex; flex-direction: column; gap: .5rem; }
+.co-option {
+  display: flex; gap: .7rem; align-items: flex-start; cursor: pointer;
+  padding: .8rem .9rem; border: 1px solid rgba(0,0,0,.14); border-radius: 3px;
+}
+.co-option:has(input:checked) { border-color: var(--gold); background: var(--warm); }
+.co-option input { width: 18px; height: 18px; margin-top: .1rem; accent-color: var(--gold); flex-shrink: 0; }
+.co-option b { display: block; font-size: .82rem; font-weight: 500; }
+.co-option small { display: block; font-size: .68rem; color: var(--muted); margin-top: .15rem; }
+.co-gift { display: flex; flex-direction: column; gap: .9rem; padding-left: .9rem; border-left: 2px solid var(--gold-dim); }
+.co-gift[hidden] { display: none; }
+.field textarea {
+  padding: .8rem .9rem; border: 1px solid rgba(0,0,0,.14); border-radius: 3px; resize: vertical;
+  background: var(--cream); font-family: inherit; font-size: 16px; color: var(--ink); outline: none;
+}
+.field textarea:focus { border-color: var(--gold); }
+.co-agree { align-items: flex-start; font-size: .74rem; line-height: 1.45; }
+.co-agree input { flex-shrink: 0; }
+.checkout-form .cart-total { margin: .4rem 0 0; }
+.checkout-form .btn { flex: 0 0 auto; }
+.order-done { text-align: center; padding: 2rem 0 1.4rem; }
+.order-done-mark {
+  width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: 50%;
+  background: var(--ink); color: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 1.5rem;
+}
+.order-done-title { font-family: 'Cormorant Garamond', serif; font-size: 1.7rem; }
+.order-done-sub { font-size: .76rem; color: var(--muted); margin-top: .3rem; }
+.order-lines { border-top: 1px solid var(--gold-dim); border-bottom: 1px solid var(--gold-dim); padding: .6rem 0; }
+.order-lines .cart-line span:first-child { padding-right: 1rem; }
+.co-next { margin: 1rem 0; }
+.co-account { margin-bottom: .6rem; }
+.co-account .auth-lead { margin-top: .6rem; }
+
+/* ── МОИ ЗАКАЗЫ ── */
+#my-orders .empty { padding: 1.2rem; }
+.order-card { padding: .9rem 0; border-bottom: 1px solid rgba(0,0,0,.07); display: flex; flex-direction: column; gap: .25rem; }
+.order-head { display: flex; justify-content: space-between; align-items: center; gap: .6rem; font-size: .86rem; }
+.order-head b { font-weight: 500; }
+.order-status {
+  font-size: .56rem; letter-spacing: .1em; text-transform: uppercase; padding: .2rem .5rem; border-radius: 2px;
+  background: var(--gold-dim); color: var(--ink); white-space: nowrap;
+}
+.order-status.st-cancelled { background: rgba(0,0,0,.06); color: var(--muted); }
+.order-status.st-paid, .order-status.st-shipped, .order-status.st-delivered { background: var(--ink); color: var(--gold-light); }
+.order-meta { font-size: .7rem; color: var(--muted); overflow-wrap: anywhere; }
+.order-items { font-size: .78rem; line-height: 1.45; }
+.order-card .link-btn { align-self: flex-start; padding-left: 0; }

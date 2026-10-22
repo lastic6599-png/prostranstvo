@@ -1,5 +1,5 @@
 // Офлайн-кэш оболочки приложения. При изменении файлов увеличьте версию.
-const CACHE = 'prostranstvo-v2';
+const CACHE = 'prostranstvo-v3';
 const SHELL = [
   './', 'index.html', 'css/app.css',
   'js/config.js', 'js/data.js', 'js/bridge.js', 'js/app.js',
